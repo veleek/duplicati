@@ -22,7 +22,6 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Net;
-using System.Security.Cryptography;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -208,9 +207,8 @@ namespace Duplicati.Library.Backend.Backblaze
             {
                 var p = measure.Position;
 
-                // Compute the hash
-                using(var hashalg = HashAlgorithm.Create("sha1"))
-                    sha1 = Library.Utility.Utility.ByteArrayAsHexString(hashalg.ComputeHash(measure));
+                using(var hashalg = HashAlgorithmHelper.Create("sha1"))
+                    sha1 = Utility.Utility.ByteArrayAsHexString(hashalg.ComputeHash(measure));
 
                 measure.Position = p;
             }

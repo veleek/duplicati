@@ -19,10 +19,8 @@
 #endregion
 using System;
 using System.Collections.Generic;
-using System.Text;
 using Duplicati.Library.Interface;
 using System.IO;
-using System.Security.Cryptography;
 
 namespace Duplicati.Library.Encryption
 {

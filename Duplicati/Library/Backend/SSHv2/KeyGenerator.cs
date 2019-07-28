@@ -19,9 +19,7 @@ using System;
 using System.Collections.Generic;
 using System.Security.Cryptography;
 using Duplicati.Library.Interface;
-using Duplicati.Library.Utility;
 using System.Text;
-using System.Linq;
 
 namespace Duplicati.Library.Backend
 {

@@ -18,9 +18,7 @@
 // 
 #endregion
 
-using System;
 using System.Collections.Generic;
-using System.Security.Cryptography;
 using System.Text;
 
 namespace Duplicati.Library.Utility
@@ -37,8 +35,10 @@ namespace Duplicati.Library.Utility
         /// <param name="inputString">The input string.</param>
         public static byte[] GetHash(string inputString)
         {
-            using(var algorithm = MD5.Create()) //or use SHA256.Create();
+            using (var algorithm = HashAlgorithmHelper.Create("MD5")) // or use "SHA256"
+            {
                 return algorithm.ComputeHash(Encoding.UTF8.GetBytes(inputString));
+            }
         }
 
 		/// <summary>
@@ -48,7 +48,7 @@ namespace Duplicati.Library.Utility
         /// <param name="inputStrings">The input strings.</param>
         public static byte[] GetHash(IEnumerable<string> inputStrings)
         {
-            using (var md5 = MD5.Create())
+            using (var md5 = HashAlgorithmHelper.Create("MD5"))
             {
                 if (inputStrings != null)
                 {

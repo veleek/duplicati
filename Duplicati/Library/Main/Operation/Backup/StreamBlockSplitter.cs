@@ -23,7 +23,6 @@ using Duplicati.Library.Utility;
 using System.Linq;
 using Duplicati.Library.Interface;
 using System.IO;
-using System.Security.Cryptography;
 
 namespace Duplicati.Library.Main.Operation.Backup
 {
@@ -48,8 +47,8 @@ namespace Duplicati.Library.Main.Operation.Backup
             async self =>
             {
                 var blocksize = options.Blocksize;
-                var filehasher = HashAlgorithm.Create(options.FileHashAlgorithm);
-                var blockhasher = HashAlgorithm.Create(options.BlockHashAlgorithm);
+                var filehasher = Duplicati.Library.Utility.HashAlgorithmHelper.Create(options.FileHashAlgorithm);
+                var blockhasher = Duplicati.Library.Utility.HashAlgorithmHelper.Create(options.BlockHashAlgorithm);
                 var emptymetadata = Utility.WrapMetadata(new Dictionary<string, string>(), options);
                 var maxmetadatasize = (options.Blocksize / (long)options.BlockhashSize) * options.Blocksize;
 

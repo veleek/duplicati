@@ -18,7 +18,6 @@
 using System;
 using System.Linq;
 using System.Collections.Generic;
-using System.Security.Cryptography;
 
 namespace Duplicati.Library.Main.Database
 {
@@ -340,7 +339,7 @@ namespace Duplicati.Library.Main.Database
 
         public void FixMissingBlocklistHashes(string blockhashalgorithm, long blocksize)
         {
-            var blockhasher = HashAlgorithm.Create(blockhashalgorithm);
+            var blockhasher = Library.Utility.HashAlgorithmHelper.Create(blockhashalgorithm);
             var hashsize = blockhasher.HashSize / 8;
             var blocklistbuffer = new byte[blocksize];
             int blocklistoffset = 0;

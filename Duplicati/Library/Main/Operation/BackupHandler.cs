@@ -34,6 +34,7 @@ using Duplicati.Library.Snapshots;
 using Duplicati.Library.Utility;
 using Duplicati.Library.Common.IO;
 using Duplicati.Library.Common;
+using Newtonsoft.Json;
 
 namespace Duplicati.Library.Main.Operation
 {

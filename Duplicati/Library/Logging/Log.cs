@@ -19,7 +19,7 @@
 #endregion
 using System;
 using System.Collections.Generic;
-using System.Text;
+using Duplicati.Logging.Duplicati.Library.Logging;
 
 namespace Duplicati.Library.Logging
 {
@@ -443,8 +443,7 @@ namespace Duplicati.Library.Logging
             {
                 lock (m_lock)
                 {
-                    /* TODO-DNC - No supported Remoting - https://github.com/dotnet/corefx/blob/master/Documentation/project-docs/porting.md
-                    var cur = System.Runtime.Remoting.Messaging.CallContext.LogicalGetData(LOGICAL_CONTEXT_KEY) as string;
+                    var cur =  CallContext.GetData(LOGICAL_CONTEXT_KEY) as string;
                     if (cur == null || cur == m_root.InstanceID)
                         return m_root;
                     
@@ -453,27 +452,21 @@ namespace Duplicati.Library.Logging
                         throw new Exception("Unable to find log in lookup table, this may be caused by attempting to transport call contexts between AppDomains (eg. with remoting calls)");
 
                     return sc;
-                    */
-
-                    return m_root;
                 }
             }
             private set
             {
                 lock (m_lock)
                 {
-                    /* TODO-DNC - No supported Remoting - https://github.com/dotnet/corefx/blob/master/Documentation/project-docs/porting.md
-
                     if (value != null)
                     {
                         m_log_instances[value.InstanceID] = value;
-                        System.Runtime.Remoting.Messaging.CallContext.LogicalSetData(LOGICAL_CONTEXT_KEY, value.InstanceID);
+                        CallContext.SetData(LOGICAL_CONTEXT_KEY, value.InstanceID);
                     }
                     else
                     {
-                        System.Runtime.Remoting.Messaging.CallContext.LogicalSetData(LOGICAL_CONTEXT_KEY, null);
+                        CallContext.SetData(LOGICAL_CONTEXT_KEY, null);
                     }
-                    */
                 }
             }
         }
