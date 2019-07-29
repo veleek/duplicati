@@ -1,9 +1,16 @@
 bin/
 obj/
+obj_standard20/
+obj_standard21/
+obj_core/
 *.resources
 *.userprefs
 *.user
 *.suo
+.vs/
+*.cache
+FileListAbsolute.txt
+AssemblyInfo.txt
 Installer/Paraffin.exe
 Installer/account_info
 Duplicati/Localization/compiled
@@ -22,5 +29,4 @@ packages
 changelog-news.txt
 binfiles.wxs
 .idea/
-.vs/
 launchSettings.json
