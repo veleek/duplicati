@@ -13,6 +13,7 @@
     <AssemblyName>Duplicati.UnitTest</AssemblyName>
     <RootNamespace>Duplicati.UnitTest</RootNamespace>
     <IsPackable>false</IsPackable>
+    <DefineConstants>$(DefineConstants);NETSTANDARD2_0</DefineConstants>
   </PropertyGroup>
   
   <ItemGroup>

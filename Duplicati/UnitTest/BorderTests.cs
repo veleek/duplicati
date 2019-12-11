@@ -22,6 +22,7 @@ using System.Collections.Generic;
 
 namespace Duplicati.UnitTest
 {
+    [Category("Border")]
     public class BorderTests : BasicSetupHelper
     {
         private readonly string recreatedDatabaseFile = Path.Combine(BASEFOLDER, "recreated-database.sqlite");
@@ -37,7 +38,6 @@ namespace Duplicati.UnitTest
         }
 
         [Test]
-        [Category("Border")]
         public void Run10kNoProgress()
         {
             RunCommands(1024 * 10, modifyOptions: opts => { 
@@ -46,14 +46,12 @@ namespace Duplicati.UnitTest
         }
 
         [Test]
-        [Category("Border")]
         public void Run10k()
         {
             RunCommands(1024 * 10);
         }
 
         [Test]
-        [Category("Border")]
         public void Run10mb()
         {
             RunCommands(1024 * 10, modifyOptions: opts => { 
@@ -62,28 +60,24 @@ namespace Duplicati.UnitTest
         }
 
         [Test]
-        [Category("Border")]
         public void Run100k()
         {
             RunCommands(1024 * 100);
         }
 
         [Test]
-        [Category("Border")]
         public void Run12345_1()
         {
             RunCommands(12345);
         }
 
         [Test]
-        [Category("Border")]
         public void Run12345_2()
         {
             RunCommands(12345, 1024 * 1024 * 10);
         }
 
         [Test]
-        [Category("Border")]
         public void RunNoMetadata()
         {
             RunCommands(1024 * 10, modifyOptions: opts => {
@@ -93,7 +87,6 @@ namespace Duplicati.UnitTest
 
 
         [Test]
-        [Category("Border")]
         public void RunMD5()
         {
             RunCommands(1024 * 10, modifyOptions: opts => {
@@ -103,7 +96,6 @@ namespace Duplicati.UnitTest
         }
             
         [Test]
-        [Category("Border")]
         public void RunSHA384()
         {
             RunCommands(1024 * 10, modifyOptions: opts => {
@@ -113,7 +105,6 @@ namespace Duplicati.UnitTest
         }
 
         [Test]
-        [Category("Border")]
         public void RunMixedBlockFile_1()
         {
             RunCommands(1024 * 10, modifyOptions: opts => {
@@ -123,7 +114,6 @@ namespace Duplicati.UnitTest
         }
 
         [Test]
-        [Category("Border")]
         public void RunMixedBlockFile_2()
         {
             RunCommands(1024 * 10, modifyOptions: opts => {
@@ -133,7 +123,6 @@ namespace Duplicati.UnitTest
         }
 
         [Test]
-        [Category("Border")]
         public void RunNoIndexFiles()
         {
             RunCommands(1024 * 10, modifyOptions: opts => {
@@ -142,7 +131,6 @@ namespace Duplicati.UnitTest
         }
 
         [Test]
-        [Category("Border")]
         public void RunSlimIndexFiles()
         {
             RunCommands(1024 * 10, modifyOptions: opts => {
@@ -151,7 +139,6 @@ namespace Duplicati.UnitTest
         }
 
         [Test]
-        [Category("Border")]
         public void RunQuickTimestamps()
         {
             RunCommands(1024 * 10, modifyOptions: opts =>
@@ -161,7 +148,6 @@ namespace Duplicati.UnitTest
         }
 
         [Test]
-        [Category("Border")]
         public void RunFullScan()
         {
             RunCommands(1024 * 10, modifyOptions: opts =>
@@ -175,26 +161,28 @@ namespace Duplicati.UnitTest
             if (basedatasize <= 0)
                 basedatasize = blocksize * 1024;
 
-            var filenames = new Dictionary<string, int>();
-            filenames[""] = basedatasize;
-            filenames["-0"] = 0;
-            filenames["-1"] = 1;
+            var filenames = new Dictionary<string, int>
+            {
+                [""] = basedatasize,
+                ["-0"] = 0,
+                ["-1"] = 1,
 
-            filenames["-p1"] = basedatasize + 1;
-            filenames["-p2"] = basedatasize + 2;
-            filenames["-p500"] = basedatasize + 500;
-            filenames["-m1"] = basedatasize - 1;
-            filenames["-m2"] = basedatasize - 2;
-            filenames["-m500"] = basedatasize - 500;
+                ["-p1"] = basedatasize + 1,
+                ["-p2"] = basedatasize + 2,
+                ["-p500"] = basedatasize + 500,
+                ["-m1"] = basedatasize - 1,
+                ["-m2"] = basedatasize - 2,
+                ["-m500"] = basedatasize - 500,
 
-            filenames["-s1"] = blocksize / 4 + 6;
-            filenames["-s2"] = blocksize / 10 + 6;
-            filenames["-l1"] = blocksize * 4 + 6;
-            filenames["-l2"] = blocksize * 10 + 6;
+                ["-s1"] = blocksize / 4 + 6,
+                ["-s2"] = blocksize / 10 + 6,
+                ["-l1"] = blocksize * 4 + 6,
+                ["-l2"] = blocksize * 10 + 6,
 
-            filenames["-bm1"] = blocksize - 1;
-            filenames["-b"] = blocksize;
-            filenames["-bp1"] = blocksize + 1;
+                ["-bm1"] = blocksize - 1,
+                ["-b"] = blocksize,
+                ["-bp1"] = blocksize + 1
+            };
 
             var data = new byte[filenames.Select(x => x.Value).Max()];
 
@@ -256,7 +244,6 @@ namespace Duplicati.UnitTest
                 File.WriteAllBytes(Path.Combine(DATAFOLDER, "c" + k.Key), data.Take(k.Value).ToArray());
             }
             
-
             using(var c = new Library.Main.Controller("file://" + TARGETFOLDER, testopts, null))
                 c.Backup(new string[] { DATAFOLDER });
             

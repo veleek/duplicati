@@ -1,23 +1,13 @@
-dist: bionic
+os: windows
 language: csharp
 solution: Duplicati.sln
 dotnet: 2.2.207
 install:
   - dotnet restore Duplicati.sln
-  - nuget restore Duplicati.sln
-  - nuget install NUnit.Runners -Version 3.10.0 -OutputDirectory testrunner
-  - sudo pip install --upgrade pip
-  - sudo pip install selenium
-  - sudo pip install --upgrade urllib3
-addons:
-  coverity_scan:
-    project:
-      name: "duplicati/duplicati"
-      description: "Duplicati Build submitted via Travis CI"
-    notification_email: kenneth@duplicati.com
-    build_command_prepend: "msbuild /t:Clean"
-    build_command:   "msbuild /t:Rebuild"
-    branch_pattern: coverity_scan
+#  - sudo pip install --upgrade pip
+#  - sudo pip install selenium
+#  - sudo pip install --upgrade urllib3
+
 env:
   global:
     - DOTNET_SKIP_FIRST_TIME_EXPERIENCE=1
@@ -35,42 +25,42 @@ jobs:
     - stage: Run unittests
       env: CATEGORY=Border
     - env: CATEGORY=Filter
-
-    - env: CATEGORY=BulkNormal
-      cache:
-        directories:
-          - $HOME/download/bulk
-
-    - env: CATEGORY=BulkNoSize
-      cache:
-        directories:
-          - $HOME/download/bulk
-
-    - env: CATEGORY=SVNData
-      cache:
-        directories:
-          - $HOME/download/svn
-
-    - env: CATEGORY=SVNDataLong
-      cache:
-        directories:
-          - $HOME/download/svn
-
-    - env: CATEGORY=Targeted
-    - env: CATEGORY=Purge
-    - env: CATEGORY=Serialization
-    - env: CATEGORY=Utility
-    - env: CATEGORY=UriUtility
-    - env: CATEGORY=WebApi
-    - env: CATEGORY=IO
-    - env: CATEGORY=ImportExport
-    - env: CATEGORY=Disruption
-
-    - env: CATEGORY=GUI
-      addons:
-        sauce_connect:
-          username: $SAUCE_USERNAME
-          access_key: $SAUCE_ACCESS_KEY
+#
+#    - env: CATEGORY=BulkNormal
+#      cache:
+#        directories:
+#          - $HOME/download/bulk
+#
+#    - env: CATEGORY=BulkNoSize
+#      cache:
+#        directories:
+#          - $HOME/download/bulk
+#
+#    - env: CATEGORY=SVNData
+#      cache:
+#        directories:
+#          - $HOME/download/svn
+#
+#    - env: CATEGORY=SVNDataLong
+#      cache:
+#        directories:
+#          - $HOME/download/svn
+#
+#    - env: CATEGORY=Targeted
+#    - env: CATEGORY=Purge
+#    - env: CATEGORY=Serialization
+#    - env: CATEGORY=Utility
+#    - env: CATEGORY=UriUtility
+#    - env: CATEGORY=WebApi
+#    - env: CATEGORY=IO
+#    - env: CATEGORY=ImportExport
+#    - env: CATEGORY=Disruption
+#
+#    - env: CATEGORY=GUI
+#      addons:
+#        sauce_connect:
+#          username: $SAUCE_USERNAME
+#          access_key: $SAUCE_ACCESS_KEY
 
 before_install:
   - chmod +x ./build.sh # make the script executable if it already is not

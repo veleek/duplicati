@@ -70,10 +70,12 @@ namespace Duplicati.Library.DynamicLoader
 
                 lock (m_lock)
                 {
-                    if (m_interfaces.ContainsKey(fileExtension))
-                        return (ICompression)Activator.CreateInstance(m_interfaces[fileExtension].GetType(), stream, mode, options);
-                    else
+                    if(!m_interfaces.TryGetValue(fileExtension, out ICompression module))
+                    {
                         return null;
+                    }
+
+                    return (ICompression)Activator.CreateInstance(module.GetType(), stream, mode, options);
                 }
             }
 

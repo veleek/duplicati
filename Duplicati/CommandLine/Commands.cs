@@ -20,6 +20,8 @@ using System.Linq;
 using System.Collections.Generic;
 using System.IO;
 using Duplicati.Library.Common.IO;
+using System.Threading.Tasks;
+using System.Threading;
 
 namespace Duplicati.CommandLine
 {
@@ -29,57 +31,58 @@ namespace Duplicati.CommandLine
         {
             public event Action<float, long, long, bool> WriteOutput;
 
-            private readonly System.Threading.ManualResetEvent m_readyEvent;
-            private readonly System.Threading.ManualResetEvent m_finishEvent;
+            private readonly ManualResetEvent m_readyEvent;
             private readonly ConsoleOutput m_output;
-            private System.Threading.Thread m_thread;
+            private Task m_task;
+            private CancellationTokenSource m_cancellationTokenSource;
             private readonly TimeSpan m_updateFrequency;
 
             public PeriodicOutput(ConsoleOutput messageSink, TimeSpan updateFrequency)
             {
                 m_output = messageSink;
-                m_readyEvent = new System.Threading.ManualResetEvent(false);
-                m_finishEvent = new System.Threading.ManualResetEvent(false);
+                m_readyEvent = new ManualResetEvent(false);
                 m_updateFrequency = updateFrequency;
-                m_thread = new System.Threading.Thread(this.ThreadMain);
-                m_thread.IsBackground = true;
-                m_thread.Name = "Periodic console writer";
-                m_thread.Start();
+
+                m_cancellationTokenSource = new CancellationTokenSource();
+                CancellationToken token = m_cancellationTokenSource.Token;
+                m_task = Task.Run(() => this.ThreadMain(token), token);
             }
 
             public void SetReady() { m_readyEvent.Set(); }
-            public void SetFinished() { m_finishEvent.Set(); }
+
+            public void SetFinished() { m_cancellationTokenSource.Cancel(); }
 
             public bool Join(TimeSpan wait)
             {
-                if (m_thread != null)
-                    return m_thread.Join(wait);
-
-                return true;
+                return m_task?.Wait(wait) ?? true;
             }
 
-            private void ThreadMain()
+            private async Task ThreadMain(CancellationToken cancellationToken)
             {
                 m_readyEvent.WaitOne();
-                if (m_finishEvent.WaitOne(TimeSpan.FromMilliseconds(10), true))
+
+                if(cancellationToken.IsCancellationRequested)
+                {
                     return;
+                }
 
                 var last_count = -1L;
-                var finished = false;
 
                 while (true)
                 {
-                    float progress;
-                    long filesprocessed;
-                    long filesizeprocessed;
-                    long filecount;
-                    long filesize;
-                    bool counting;
-                    m_output.OperationProgress.UpdateOverall(out _, out progress, out filesprocessed, out filesizeprocessed, out filecount, out filesize, out counting);
+                    m_output.OperationProgress.UpdateOverall(
+                        out _,
+                        out float progress,
+                        out long filesprocessed,
+                        out long filesizeprocessed,
+                        out long filecount,
+                        out long filesize,
+                        out bool counting);
 
                     var files = Math.Max(0, filecount - filesprocessed);
                     var size = Math.Max(0, filesize - filesizeprocessed);
 
+                    bool finished = cancellationToken.IsCancellationRequested;
                     if (finished)
                     {
                         files = 0;
@@ -89,8 +92,7 @@ namespace Duplicati.CommandLine
                         files = Math.Max(1, files);
 
                     if (last_count < 0 || files != last_count)
-                        if (WriteOutput != null)
-                            WriteOutput(progress, files, size, counting);
+                        WriteOutput?.Invoke(progress, files, size, counting);
 
                     if (!counting)
                         last_count = files;
@@ -98,46 +100,45 @@ namespace Duplicati.CommandLine
                     if (finished)
                         return;
 
-                    finished = m_finishEvent.WaitOne(m_updateFrequency, true);
+                    // WhenAny allows us to wait on the cancellation token without throwing if it's cancelled.
+                    await Task.WhenAny(Task.Delay(m_updateFrequency, cancellationToken));
                 }
             }
 
             public void Dispose()
             {
-                if (m_thread != null)
+                if (m_task == null)
                 {
-                    try
-                    {
-                        m_finishEvent.Set();
-                        m_readyEvent.Set();
+                    return;
+                }
 
-                        if (m_thread != null && m_thread.IsAlive)
-                        {
-                            m_thread.Abort();
-                            m_thread.Join(500);
-                        }
-                    }
-                    finally
-                    {
-                        m_thread = null;
-                    }
+                try
+                {
+                    SetFinished();
+                    SetReady();
+
+                    Join(TimeSpan.FromMilliseconds(500));
+                }
+                finally
+                {
+                    m_task = null;
                 }
             }
         }
 
-        public static int Examples(TextWriter outwriter, Action<Duplicati.Library.Main.Controller> setup, List<string> args, Dictionary<string, string> options, Library.Utility.IFilter filter)
+        public static int Examples(TextWriter outwriter, Action<Library.Main.Controller> setup, List<string> args, Dictionary<string, string> options, Library.Utility.IFilter filter)
         {
             Duplicati.CommandLine.Help.PrintUsage(outwriter, "example", options);
             return 0;
         }
 
-        public static int Help(TextWriter outwriter, Action<Duplicati.Library.Main.Controller> setup, List<string> args, Dictionary<string, string> options, Library.Utility.IFilter filter)
+        public static int Help(TextWriter outwriter, Action<Library.Main.Controller> setup, List<string> args, Dictionary<string, string> options, Library.Utility.IFilter filter)
         {
             Duplicati.CommandLine.Help.PrintUsage(outwriter, args.Count > 1? args[1]  : "help", options);
             return 0;
         }
 
-        public static int Affected(TextWriter outwriter, Action<Duplicati.Library.Main.Controller> setup, List<string> args, Dictionary<string, string> options, Library.Utility.IFilter filter)
+        public static int Affected(TextWriter outwriter, Action<Library.Main.Controller> setup, List<string> args, Dictionary<string, string> options, Library.Utility.IFilter filter)
         {
             var fullresult = Duplicati.Library.Utility.Utility.ParseBoolOption(options, "full-result");
             var backend = args[0];
@@ -154,7 +155,7 @@ namespace Duplicati.CommandLine
             options.TryGetValue("dbpath", out dbpath);
             if (string.IsNullOrEmpty(dbpath))
             {
-                dbpath = Library.Main.DatabaseLocator.GetDatabasePath(backend, new Duplicati.Library.Main.Options(options), false, true);
+                dbpath = Library.Main.DatabaseLocator.GetDatabasePath(backend, new Library.Main.Options(options), false, true);
                 if (dbpath != null)
                     options["dbpath"] = dbpath;
             }
@@ -242,11 +243,11 @@ namespace Duplicati.CommandLine
                  && !arg.StartsWith("[", StringComparison.Ordinal) ? "*" + Util.DirectorySeparatorString + arg : arg).ToList();
         }
 
-        public static int List(TextWriter outwriter, Action<Duplicati.Library.Main.Controller> setup, List<string> args, Dictionary<string, string> options, Library.Utility.IFilter filter)
+        public static int List(TextWriter outwriter, Action<Library.Main.Controller> setup, List<string> args, Dictionary<string, string> options, Library.Utility.IFilter filter)
         {
-            filter = filter ?? new Duplicati.Library.Utility.FilterExpression();
+            filter = filter ?? new Library.Utility.FilterExpression();
             if (Duplicati.Library.Utility.Utility.ParseBoolOption(options, "list-sets-only"))
-                filter = new Duplicati.Library.Utility.FilterExpression();
+                filter = new Library.Utility.FilterExpression();
 
             using (var console = new ConsoleOutput(outwriter, options))
             using(var i = new Library.Main.Controller(args[0], options, console))
@@ -289,7 +290,7 @@ namespace Duplicati.CommandLine
                 options.TryGetValue("dbpath", out dbpath);
                 if (string.IsNullOrEmpty(dbpath))
                 {
-                    dbpath = Library.Main.DatabaseLocator.GetDatabasePath(backend, new Duplicati.Library.Main.Options(options), false, true);
+                    dbpath = Library.Main.DatabaseLocator.GetDatabasePath(backend, new Library.Main.Options(options), false, true);
                     if (dbpath != null)
                         options["dbpath"] = dbpath;
                 }
@@ -385,7 +386,7 @@ namespace Duplicati.CommandLine
             return 0;
         }
 
-        public static int Delete(TextWriter outwriter, Action<Duplicati.Library.Main.Controller> setup, List<string> args, Dictionary<string, string> options, Library.Utility.IFilter filter)
+        public static int Delete(TextWriter outwriter, Action<Library.Main.Controller> setup, List<string> args, Dictionary<string, string> options, Library.Utility.IFilter filter)
         {
             var requiredOptions = new string[] { "keep-time", "keep-versions", "version" };
 
@@ -422,13 +423,13 @@ namespace Duplicati.CommandLine
 
         }
 
-        public static int Repair(TextWriter outwriter, Action<Duplicati.Library.Main.Controller> setup, List<string> args, Dictionary<string, string> options, Library.Utility.IFilter filter)
+        public static int Repair(TextWriter outwriter, Action<Library.Main.Controller> setup, List<string> args, Dictionary<string, string> options, Library.Utility.IFilter filter)
         {
             if (args.Count != 1)
                 return PrintWrongNumberOfArguments(outwriter, args, 1);
 
             using (var console = new ConsoleOutput(outwriter, options))
-            using (var i = new Duplicati.Library.Main.Controller(args[0], options, console))
+            using (var i = new Library.Main.Controller(args[0], options, console))
             {
                 setup(i);
                 i.Repair(filter);
@@ -437,7 +438,7 @@ namespace Duplicati.CommandLine
             return 0;
         }
 
-        public static int Restore(TextWriter outwriter, Action<Duplicati.Library.Main.Controller> setup, List<string> args, Dictionary<string, string> options, Library.Utility.IFilter filter)
+        public static int Restore(TextWriter outwriter, Action<Library.Main.Controller> setup, List<string> args, Dictionary<string, string> options, Library.Utility.IFilter filter)
         {
             if (args.Count < 1)
                 return PrintWrongNumberOfArguments(outwriter, args, 1);
@@ -531,7 +532,7 @@ namespace Duplicati.CommandLine
             return 0;
         }
 
-        public static int Backup(TextWriter outwriter, Action<Duplicati.Library.Main.Controller> setup, List<string> args, Dictionary<string, string> options, Library.Utility.IFilter filter)
+        public static int Backup(TextWriter outwriter, Action<Library.Main.Controller> setup, List<string> args, Dictionary<string, string> options, Library.Utility.IFilter filter)
         {
             if (args.Count < 2)
                 return PrintWrongNumberOfArguments(outwriter, args, 2);
@@ -544,7 +545,7 @@ namespace Duplicati.CommandLine
             {
                 using (var periodicOutput = new PeriodicOutput(output, TimeSpan.FromSeconds(5)))
                 {
-                    if ((new Duplicati.Library.Main.Options(options)).DisableOnBattery && (Duplicati.Library.Utility.Power.PowerSupply.GetSource() == Duplicati.Library.Utility.Power.PowerSupply.Source.Battery))
+                    if ((new Library.Main.Options(options)).DisableOnBattery && (Duplicati.Library.Utility.Power.PowerSupply.GetSource() == Duplicati.Library.Utility.Power.PowerSupply.Source.Battery))
                     {
                         output.MessageEvent("The \"disable-on-battery\" option only affects scheduled backups and is ignored by backups run manually or from the command line.");
                     }
@@ -598,7 +599,7 @@ namespace Duplicati.CommandLine
                     outwriter.WriteLine();
                 }
 
-                var parsedStats = result.BackendStatistics as Duplicati.Library.Interface.IParsedBackendStatistics;
+                var parsedStats = result.BackendStatistics as Library.Interface.IParsedBackendStatistics;
                 output.MessageEvent(string.Format("  Duration of backup: {0:hh\\:mm\\:ss}", result.Duration));
                 if (parsedStats != null)
                 {
@@ -651,7 +652,7 @@ namespace Duplicati.CommandLine
             }
         }
 
-        public static int Compact(TextWriter outwriter, Action<Duplicati.Library.Main.Controller> setup, List<string> args, Dictionary<string, string> options, Library.Utility.IFilter filter)
+        public static int Compact(TextWriter outwriter, Action<Library.Main.Controller> setup, List<string> args, Dictionary<string, string> options, Library.Utility.IFilter filter)
         {
             if (args.Count != 1)
                 return PrintWrongNumberOfArguments(outwriter, args, 1);
@@ -666,7 +667,7 @@ namespace Duplicati.CommandLine
             return 0;
         }
 
-        public static int Test(TextWriter outwriter, Action<Duplicati.Library.Main.Controller> setup, List<string> args, Dictionary<string, string> options, Library.Utility.IFilter filter)
+        public static int Test(TextWriter outwriter, Action<Library.Main.Controller> setup, List<string> args, Dictionary<string, string> options, Library.Utility.IFilter filter)
         {
             var fullResults = Duplicati.Library.Utility.Utility.ParseBoolOption(options, "full-result");
             if (args.Count != 1 && args.Count != 2)
@@ -749,7 +750,7 @@ namespace Duplicati.CommandLine
             return 200;
         }
 
-        public static int CreateBugReport(TextWriter outwriter, Action<Duplicati.Library.Main.Controller> setup, List<string> args, Dictionary<string, string> options, Library.Utility.IFilter filter)
+        public static int CreateBugReport(TextWriter outwriter, Action<Library.Main.Controller> setup, List<string> args, Dictionary<string, string> options, Library.Utility.IFilter filter)
         {
             // Support for not adding the --auth-username if possible
             string dbpath = null;
@@ -757,7 +758,7 @@ namespace Duplicati.CommandLine
             if (string.IsNullOrEmpty(dbpath))
             {
                 if (args.Count > 0)
-                    dbpath = Library.Main.DatabaseLocator.GetDatabasePath(args[0], new Duplicati.Library.Main.Options(options), false, true);
+                    dbpath = Library.Main.DatabaseLocator.GetDatabasePath(args[0], new Library.Main.Options(options), false, true);
 
                 if (dbpath == null)
                 {
@@ -791,7 +792,7 @@ namespace Duplicati.CommandLine
             return 0;
         }
 
-        public static int ListChanges(TextWriter outwriter, Action<Duplicati.Library.Main.Controller> setup, List<string> args, Dictionary<string, string> options, Library.Utility.IFilter filter)
+        public static int ListChanges(TextWriter outwriter, Action<Library.Main.Controller> setup, List<string> args, Dictionary<string, string> options, Library.Utility.IFilter filter)
         {
             var fullresult = Duplicati.Library.Utility.Utility.ParseBoolOption(options, "full-result");
 
@@ -803,7 +804,7 @@ namespace Duplicati.CommandLine
             options.TryGetValue("dbpath", out dbpath);
             if (string.IsNullOrEmpty(dbpath))
             {
-                dbpath = Library.Main.DatabaseLocator.GetDatabasePath(args[0], new Duplicati.Library.Main.Options(options), false, true);
+                dbpath = Library.Main.DatabaseLocator.GetDatabasePath(args[0], new Library.Main.Options(options), false, true);
                 if (dbpath != null)
                     options["dbpath"] = dbpath;
             }
@@ -817,7 +818,7 @@ namespace Duplicati.CommandLine
                     options["no-encryption"] = "true";
             }
 
-            Action<Duplicati.Library.Interface.IListChangesResults, IEnumerable<Tuple<Library.Interface.ListChangesChangeType, Library.Interface.ListChangesElementType, string>>> handler =
+            Action<Library.Interface.IListChangesResults, IEnumerable<Tuple<Library.Interface.ListChangesChangeType, Library.Interface.ListChangesElementType, string>>> handler =
                 (result, items) =>
                 {
                     outwriter.WriteLine("Listing changes");
@@ -931,7 +932,7 @@ namespace Duplicati.CommandLine
             return 0;
         }
 
-        public static int TestFilters(TextWriter outwriter, Action<Duplicati.Library.Main.Controller> setup, List<string> args, Dictionary<string, string> options, Library.Utility.IFilter filter)
+        public static int TestFilters(TextWriter outwriter, Action<Library.Main.Controller> setup, List<string> args, Dictionary<string, string> options, Library.Utility.IFilter filter)
         {
             if (args == null || args.Count < 1)
             {
@@ -951,7 +952,7 @@ namespace Duplicati.CommandLine
             return 0;
         }
 
-        public static int SystemInfo(TextWriter outwriter, Action<Duplicati.Library.Main.Controller> setup, List<string> args, Dictionary<string, string> options, Library.Utility.IFilter filter)
+        public static int SystemInfo(TextWriter outwriter, Action<Library.Main.Controller> setup, List<string> args, Dictionary<string, string> options, Library.Utility.IFilter filter)
         {
             if (args != null && args.Count != 0)
             {
@@ -973,7 +974,7 @@ namespace Duplicati.CommandLine
             return 0;
         }
 
-        public static int PurgeFiles(TextWriter outwriter, Action<Duplicati.Library.Main.Controller> setup, List<string> args, Dictionary<string, string> options, Library.Utility.IFilter filter)
+        public static int PurgeFiles(TextWriter outwriter, Action<Library.Main.Controller> setup, List<string> args, Dictionary<string, string> options, Library.Utility.IFilter filter)
         {
             if (args.Count < 1)
                 return PrintWrongNumberOfArguments(outwriter, args, 1);
@@ -1008,7 +1009,7 @@ namespace Duplicati.CommandLine
             return 0;
         }
 
-        public static int ListBrokenFiles(TextWriter outwriter, Action<Duplicati.Library.Main.Controller> setup, List<string> args, Dictionary<string, string> options, Library.Utility.IFilter filter)
+        public static int ListBrokenFiles(TextWriter outwriter, Action<Library.Main.Controller> setup, List<string> args, Dictionary<string, string> options, Library.Utility.IFilter filter)
         {
             if (args.Count != 1)
                 return PrintWrongNumberOfArguments(outwriter, args, 1);
@@ -1046,7 +1047,7 @@ namespace Duplicati.CommandLine
             return 0;
         }
 
-        public static int PurgeBrokenFiles(TextWriter outwriter, Action<Duplicati.Library.Main.Controller> setup, List<string> args, Dictionary<string, string> options, Library.Utility.IFilter filter)
+        public static int PurgeBrokenFiles(TextWriter outwriter, Action<Library.Main.Controller> setup, List<string> args, Dictionary<string, string> options, Library.Utility.IFilter filter)
         {
             if (args.Count != 1)
                 return PrintWrongNumberOfArguments(outwriter, args, 1);
@@ -1061,7 +1062,7 @@ namespace Duplicati.CommandLine
             return 0;
         }
 
-        public static int SendMail(TextWriter outwriter, Action<Duplicati.Library.Main.Controller> setup, List<string> args, Dictionary<string, string> options, Library.Utility.IFilter filter)
+        public static int SendMail(TextWriter outwriter, Action<Library.Main.Controller> setup, List<string> args, Dictionary<string, string> options, Library.Utility.IFilter filter)
         {
             if (args != null && args.Count != 0)
             {
@@ -1082,7 +1083,7 @@ namespace Duplicati.CommandLine
 
         public static int Vacuum(
             TextWriter outwriter,
-            Action<Duplicati.Library.Main.Controller> setup,
+            Action<Library.Main.Controller> setup,
             List<string> args, Dictionary<string, string> options,
             Library.Utility.IFilter filter)
         {

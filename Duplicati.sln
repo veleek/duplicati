@@ -101,7 +101,24 @@ Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "Duplicati.CommandLine.Confi
 EndProject
 Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "Duplicati.Library.Encryption", "Duplicati\Library\Encryption\Duplicati.Library.Encryption.csproj", "{2CF2D90E-C25B-47AD-91E0-98451BAB8058}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Duplicati.CommandLine.AutoUpdater", "Duplicati\CommandLine\AutoUpdater\Duplicati.CommandLine.AutoUpdater.csproj", "{4D1B198B-F773-44F2-872B-2B283053323C}"
+Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "Duplicati.CommandLine.AutoUpdater", "Duplicati\CommandLine\AutoUpdater\Duplicati.CommandLine.AutoUpdater.csproj", "{4D1B198B-F773-44F2-872B-2B283053323C}"
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Solution Items", "Solution Items", "{4D021B57-CD8A-42AD-9DEA-AAEFCBC53922}"
+	ProjectSection(SolutionItems) = preProject
+		.appveyor.yml = .appveyor.yml
+		.gitignore = .gitignore
+		.travis.yml = .travis.yml
+		build-debug-update.sh = build-debug-update.sh
+		build-installers.sh = build-installers.sh
+		build-release.sh = build-release.sh
+		build.sh = build.sh
+		deploy-debug.sh = deploy-debug.sh
+		fix-sln.py = fix-sln.py
+		make.sh = make.sh
+		README.md = README.md
+		tabs-to-spaces.sh = tabs-to-spaces.sh
+		unix2dos.py = unix2dos.py
+	EndProjectSection
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution

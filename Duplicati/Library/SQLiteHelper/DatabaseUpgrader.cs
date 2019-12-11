@@ -56,7 +56,7 @@ namespace Duplicati.Library.SQLiteHelper
     public static class DatabaseUpgrader
     {
         //This is the "folder" where the embedded resources can be found
-        private const string FOLDER_NAME = "Duplicati.Library.Main.Database.Database_schema";
+        private const string FOLDER_NAME = "Database.Database_schema";
         
         //This is the name of the schema sql
         private const string SCHEMA_NAME = "Schema.sql";
@@ -139,37 +139,27 @@ namespace Duplicati.Library.SQLiteHelper
         {
             var asm = eltype.Assembly;
 
+            string prefix = $"{asm.GetName().Name}.{FOLDER_NAME}.";
+
             string schema;
-            using (var rd = new System.IO.StreamReader(asm.GetManifestResourceStream($"{FOLDER_NAME}.{SCHEMA_NAME}")))
+            using (var rd = new System.IO.StreamReader(asm.GetManifestResourceStream($"{prefix}{SCHEMA_NAME}")))
                 schema = rd.ReadToEnd();
 
-            //Get updates, and sort them according to version
-            //This enables upgrading through several versions
-            //ea, from 1 to 8, by stepping 2->3->4->5->6->7->8
+            // Database schema updates are all additive.  In order to upgrade through multiple versions, each of
+            // the schema updates is applied sequentially. So to upgrade from version 2 to 5 schema updates for
+            // versions 3, 4, and 5 are each applied.
             SortedDictionary<int, string> upgrades = new SortedDictionary<int, string>();
-            string prefix = FOLDER_NAME + ".";
             foreach (string s in asm.GetManifestResourceNames())
             {
-                //The resource name will be "Duplicati.Library.Main.Database.Database_schema.1.Sample upgrade.sql"
-                //The number indicates the version that will be upgraded to
+                // The resource name will be like "<FOLDER_NAME>.1. Sample upgrade.sql" where the number 
+                // indicates the version of the upgrade.
                 if (s.StartsWith(prefix, StringComparison.Ordinal) && !s.Equals(prefix + SCHEMA_NAME))
                 {
-                    try
-                    {
-                        string version = s.Substring(prefix.Length, s.IndexOf(".", prefix.Length + 1, StringComparison.Ordinal) - prefix.Length);
-                        int fileversion = int.Parse(version);
+                    string version = s.Substring(prefix.Length, s.IndexOf(".", prefix.Length + 1, StringComparison.Ordinal) - prefix.Length);
+                    int fileversion = int.Parse(version);
 
-                        string prev;
-
-                        if (!upgrades.TryGetValue(fileversion, out prev))
-
-                            prev = "";
-
-                        upgrades[fileversion] = prev + new System.IO.StreamReader(asm.GetManifestResourceStream(s)).ReadToEnd();
-                    }
-                    catch
-                    {
-                    }
+                    upgrades.TryGetValue(fileversion, out string prev);
+                    upgrades[fileversion] = prev + new System.IO.StreamReader(asm.GetManifestResourceStream(s)).ReadToEnd();
                 }
             }
 

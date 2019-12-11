@@ -26,7 +26,9 @@ namespace Duplicati.UnitTest
     public class CompressionTests
     {
         [TestCase("zip")]
+#if !NETSTANDARD2_0
         [TestCase("7z")]
+#endif
         public void TestCompressionHints(string module)
         {
             const int TESTSIZE = 1024 * 1024;
@@ -34,8 +36,10 @@ namespace Duplicati.UnitTest
             using (var tf0 = new MemoryStream())
             using (var tf1 = new MemoryStream())
             {
-                var opts = new Dictionary<string, string>();
-                opts["zip-compression-level"] = "9";
+                var opts = new Dictionary<string, string>
+                {
+                    ["zip-compression-level"] = "9"
+                };
 
                 using (var z0 = Library.DynamicLoader.CompressionLoader.GetModule(module, tf0, Library.Interface.ArchiveMode.Write, opts))
                 using (var fs0 = z0.CreateFile("sample", Library.Interface.CompressionHint.Noncompressible, DateTime.Now))
@@ -59,7 +63,9 @@ namespace Duplicati.UnitTest
         /// </summary>
         /// <param name="module"></param>
         [TestCase("zip")]
+#if !NETSTANDARD2_0
         [TestCase("7z")]
+#endif
         public void TestCompressionReversibility(string module)
         {
             const int TESTSIZE = 1024 * 1024;

@@ -15,7 +15,6 @@
 //  License along with this library; if not, write to the Free Software
 //  Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA 02111-1307 USA
 using System;
-using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using Duplicati.Library.Common.IO;
@@ -44,14 +43,14 @@ namespace Duplicati.UnitTest
 
             using (var c = new Library.Main.Controller("file://" + TARGETFOLDER, testopts, null))
             {
-                var res = c.Backup(new string[] { DATAFOLDER }, new Library.Utility.FilterExpression(round1.Select(x => "*" + Path.DirectorySeparatorChar + x)));
+                var res = c.Backup(new string[] { DATAFOLDER }, new FilterExpression(round1.Select(x => "*" + Path.DirectorySeparatorChar + x)));
                 Assert.AreEqual(res.AddedFiles, round1.Length);
             }
 
             System.Threading.Thread.Sleep(TimeSpan.FromSeconds(5));
             using (var c = new Library.Main.Controller("file://" + TARGETFOLDER, testopts, null))
             {
-                var res = c.Backup(new string[] { DATAFOLDER }, new Library.Utility.FilterExpression(round2.Select(x => "*" + Path.DirectorySeparatorChar + x)));
+                var res = c.Backup(new string[] { DATAFOLDER }, new FilterExpression(round2.Select(x => "*" + Path.DirectorySeparatorChar + x)));
                 Assert.AreEqual(res.AddedFiles, round2.Length - round1.Length);
             }
 
@@ -83,7 +82,7 @@ namespace Duplicati.UnitTest
 
             using (var c = new Library.Main.Controller("file://" + TARGETFOLDER, testopts, null))
             {
-                var res = c.PurgeFiles(new Library.Utility.FilterExpression("*" + Path.DirectorySeparatorChar + allversion_candidate));
+                var res = c.PurgeFiles(new FilterExpression("*" + Path.DirectorySeparatorChar + allversion_candidate));
                 Assert.AreEqual(3, res.RewrittenFileLists, "Incorrect number of rewritten filesets after all-versions purge");
                 Assert.AreEqual(3, res.RemovedFileCount, "Incorrect number of removed files after all-versions purge");
             }
@@ -92,7 +91,7 @@ namespace Duplicati.UnitTest
             {
                 using (var c = new Library.Main.Controller("file://" + TARGETFOLDER, testopts.Expand(new { version = i }), null))
                 {
-                    var res = c.PurgeFiles(new Library.Utility.FilterExpression(Path.Combine(this.DATAFOLDER, single_version_candidate)));
+                    var res = c.PurgeFiles(new FilterExpression(Path.Combine(DATAFOLDER, single_version_candidate)));
                     Assert.AreEqual(1, res.RewrittenFileLists, "Incorrect number of rewritten filesets after single-versions purge");
                     Assert.AreEqual(1, res.RemovedFileCount, "Incorrect number of removed files after single-versions purge");
                 }
@@ -100,14 +99,14 @@ namespace Duplicati.UnitTest
 
             using (var c = new Library.Main.Controller("file://" + TARGETFOLDER, testopts, null))
             {
-                var res = c.PurgeFiles(new Library.Utility.FilterExpression(round2.Skip(round1.Length).Take(2).Select(x => "*" + Path.DirectorySeparatorChar + x)));
+                var res = c.PurgeFiles(new FilterExpression(round2.Skip(round1.Length).Take(2).Select(x => "*" + Path.DirectorySeparatorChar + x)));
                 Assert.AreEqual(2, res.RewrittenFileLists, "Incorrect number of rewritten filesets after 2-versions purge");
                 Assert.AreEqual(4, res.RemovedFileCount, "Incorrect number of removed files after 2-versions purge");
             }
 
             using (var c = new Library.Main.Controller("file://" + TARGETFOLDER, testopts, null))
             {
-                var res = c.PurgeFiles(new Library.Utility.FilterExpression(round3.Skip(round2.Length).Take(2).Select(x => "*" + Path.DirectorySeparatorChar + x)));
+                var res = c.PurgeFiles(new FilterExpression(round3.Skip(round2.Length).Take(2).Select(x => "*" + Path.DirectorySeparatorChar + x)));
                 Assert.AreEqual(1, res.RewrittenFileLists, "Incorrect number of rewritten filesets after 1-versions purge");
                 Assert.AreEqual(2, res.RemovedFileCount, "Incorrect number of removed files after 1-versions purge");
             }
@@ -168,7 +167,7 @@ namespace Duplicati.UnitTest
 
             using (var c = new Library.Main.Controller("file://" + TARGETFOLDER, testopts, null))
             {
-                var res = c.Backup(new string[] { DATAFOLDER }, new Library.Utility.FilterExpression(round1.Select(x => "*" + Path.DirectorySeparatorChar + x)));
+                var res = c.Backup(new string[] { DATAFOLDER }, new FilterExpression(round1.Select(x => "*" + Path.DirectorySeparatorChar + x)));
                 Assert.AreEqual(res.AddedFiles, round1.Length);
             }
 
@@ -182,7 +181,7 @@ namespace Duplicati.UnitTest
             System.Threading.Thread.Sleep(TimeSpan.FromSeconds(5));
             using (var c = new Library.Main.Controller("file://" + TARGETFOLDER, testopts, null))
             {
-                var res = c.Backup(new string[] { DATAFOLDER }, new Library.Utility.FilterExpression(round2.Select(x => "*" + Path.DirectorySeparatorChar + x)));
+                var res = c.Backup(new string[] { DATAFOLDER }, new FilterExpression(round2.Select(x => "*" + Path.DirectorySeparatorChar + x)));
                 Assert.AreEqual(round2.Length - round1.Length, res.AddedFiles);
             }
 

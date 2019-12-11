@@ -34,25 +34,25 @@ namespace Duplicati.UnitTest
         /// <summary>
         /// The folder path that serves as the backup destination
         /// </summary>
-        protected readonly string TARGETFOLDER = TestUtils.GetDefaultTarget(Path.Combine(BASEFOLDER, "autotest"));
+        protected static readonly string TARGETFOLDER = TestUtils.GetDefaultTarget(Path.Combine(BASEFOLDER, "autotest"));
 
         /// <summary>
         /// The folder that contains data to be backed up
         /// </summary>
-        protected readonly string DATAFOLDER = Path.Combine(BASEFOLDER, "backup-data");
+        protected static readonly string DATAFOLDER = Path.Combine(BASEFOLDER, "backup-data");
 
         /// <summary>
         /// The folder where data is restored into
         /// </summary>
-        protected readonly string RESTOREFOLDER = Path.Combine(BASEFOLDER, "restored");
+        protected static readonly string RESTOREFOLDER = Path.Combine(BASEFOLDER, "restored");
         /// <summary>
         /// The log file for manual examiniation
         /// </summary>
-        protected readonly string LOGFILE = Path.Combine(BASEFOLDER, "logfile.log");
+        protected static readonly string LOGFILE = Path.Combine(BASEFOLDER, "logfile.log");
         /// <summary>
         /// The database is fixed so it does not mess up the system where the test is performed
         /// </summary>
-        protected readonly string DBFILE = Path.Combine(BASEFOLDER, "autotest.sqlite");
+        protected static readonly string DBFILE = Path.Combine(BASEFOLDER, "autotest.sqlite");
 
         /// <summary>
         /// Value indicating if all output is redirected to TestContext.Progress,
@@ -95,37 +95,37 @@ namespace Duplicati.UnitTest
         [SetUp]
         public virtual void SetUp()
         {
-            Directory.CreateDirectory(this.DATAFOLDER);
-            Directory.CreateDirectory(this.TARGETFOLDER);
-            Directory.CreateDirectory(this.RESTOREFOLDER);
+            Directory.CreateDirectory(DATAFOLDER);
+            Directory.CreateDirectory(TARGETFOLDER);
+            Directory.CreateDirectory(RESTOREFOLDER);
         }
 
         [TearDown]
         public virtual void TearDown()
         {
-            if (Directory.Exists(this.DATAFOLDER))
+            if (Directory.Exists(DATAFOLDER))
             {
-                Directory.Delete(this.DATAFOLDER, true);
+                Directory.Delete(DATAFOLDER, true);
             }
-            if (Directory.Exists(this.TARGETFOLDER))
+            if (Directory.Exists(TARGETFOLDER))
             {
-                Directory.Delete(this.TARGETFOLDER, true);
+                Directory.Delete(TARGETFOLDER, true);
             }
-            if (Directory.Exists(this.RESTOREFOLDER))
+            if (Directory.Exists(RESTOREFOLDER))
             {
-                Directory.Delete(this.RESTOREFOLDER, true);
+                Directory.Delete(RESTOREFOLDER, true);
             }
-            if (File.Exists(this.LOGFILE))
+            if (File.Exists(LOGFILE))
             {
-                File.Delete(this.LOGFILE);
+                File.Delete(LOGFILE);
             }
-            if (File.Exists(this.DBFILE))
+            if (File.Exists(DBFILE))
             {
-                File.Delete(this.DBFILE);
+                File.Delete(DBFILE);
             }
-            if (File.Exists($"{this.DBFILE}-journal"))
+            if (File.Exists($"{DBFILE}-journal"))
             {
-                File.Delete($"{this.DBFILE}-journal");
+                File.Delete($"{DBFILE}-journal");
             }
         }
 
@@ -134,10 +134,6 @@ namespace Duplicati.UnitTest
             get
             {
                 var opts = TestUtils.DefaultOptions;
-                //opts["blockhash-lookup-memory"] = "0";
-                //opts["filehash-lookup-memory"] = "0";
-                //opts["metadatahash-lookup-memory"] = "0";
-                //opts["disable-filepath-cache"] = "true";
 
                 opts["passphrase"] = "123456";
                 opts["debug-output"] = "true";

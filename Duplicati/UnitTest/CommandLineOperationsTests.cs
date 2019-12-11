@@ -35,38 +35,29 @@ namespace Duplicati.UnitTest
         /// <summary>
         /// The folder that contains all the source data which the test is based on
         /// </summary>
-        protected readonly string SOURCEFOLDER = Path.Combine(BASEFOLDER, "data");
+        protected static readonly string SOURCEFOLDER = Path.Combine(BASEFOLDER, "data");
 
-        private readonly string zipFilename = "data.zip";
-        private string zipFilepath => Path.Combine(BASEFOLDER, this.zipFilename);
+        private static readonly string zipFilename = "data.zip";
+        private static string zipFilepath => Path.Combine(BASEFOLDER, zipFilename);
         
-        private readonly string zipAlternativeFilename = "data-alternative.zip";
-        private string zipAlternativeFilepath => Path.Combine(BASEFOLDER, this.zipAlternativeFilename);
+        private static readonly string zipAlternativeFilename = "data-alternative.zip";
+        private static string zipAlternativeFilepath => Path.Combine(BASEFOLDER, zipAlternativeFilename);
 
-        protected virtual IEnumerable<string> SourceDataFolders
-        {
-            get
-            {
-                return
-                    from x in Directory.EnumerateDirectories(SOURCEFOLDER)
-                    orderby x
-                    select x;
-            }
-        }
+        protected static List<string> SourceDataFolders => Directory.EnumerateDirectories(SOURCEFOLDER).OrderBy(x => x).ToList();
 
-        public override void OneTimeSetUp()
+        public override void SetUp()
         {
-            base.OneTimeSetUp();
+            base.SetUp();
 
             if (!File.Exists(zipAlternativeFilepath))
             {
-                var url = $"{S3_URL}{this.zipFilename}";
+                var url = $"{S3_URL}{zipFilename}";
                 DownloadS3FileIfNewer(zipFilepath, url);
-                System.IO.Compression.ZipFile.ExtractToDirectory(this.zipFilepath, BASEFOLDER);
+                System.IO.Compression.ZipFile.ExtractToDirectory(zipFilepath, BASEFOLDER);
             }
             else
             {
-                System.IO.Compression.ZipFile.ExtractToDirectory(this.zipAlternativeFilepath, BASEFOLDER);
+                System.IO.Compression.ZipFile.ExtractToDirectory(zipAlternativeFilepath, BASEFOLDER);
             }
         }
 
@@ -104,9 +95,9 @@ namespace Duplicati.UnitTest
 
         public override void OneTimeTearDown()
         {
-            if (Directory.Exists(this.SOURCEFOLDER))
+            if (Directory.Exists(SOURCEFOLDER))
             {
-                Directory.Delete(this.SOURCEFOLDER, true);
+                Directory.Delete(SOURCEFOLDER, true);
             }
         }
 
@@ -131,10 +122,18 @@ namespace Duplicati.UnitTest
             var opts = from n in TestOptions select string.Format("--{0}=\"{1}\"", n.Key, n.Value);
             var backupargs = (new string[] { "backup", target, DATAFOLDER }.Union(opts)).ToArray();
 
-            if (SourceDataFolders == null || SourceDataFolders.Count() < 3)
+            if (SourceDataFolders == null)
             {
-                ProgressWriteLine($"ERROR: A minimum of 3 data folders are required in {SOURCEFOLDER}.");
-                throw new Exception("Failed during initial minimum data folder check");
+                string message = $"Unable to find source data folder '{SOURCEFOLDER}'.";
+                ProgressWriteLine("ERROR: " + message);
+                Assert.Fail(message);
+            }
+
+            if (SourceDataFolders.Count() < 3)
+            {
+                string message = $"A minimum of 3 data folders are required in '{SOURCEFOLDER}' but found {SourceDataFolders.Count()}.";
+                ProgressWriteLine("ERROR: " + message);
+                Assert.Fail(message);
             }
 
             foreach (var n in SourceDataFolders)
@@ -161,27 +160,23 @@ namespace Duplicati.UnitTest
             using (new Library.Logging.Timer(LOGTAG, "UnchangedBackup", "Unchanged backup"))
                 Duplicati.CommandLine.Program.RealMain(backupargs);
 
-            var datafolders = Directory.EnumerateDirectories(DATAFOLDER);
+            var datafolders = Directory.EnumerateDirectories(DATAFOLDER).ToList();
+            var folderToRename = datafolders[datafolders.Count() / 2];
 
-            var f = datafolders.Skip(datafolders.Count() / 2).First();
-
-            ProgressWriteLine("Renaming folder {0}", Path.GetFileName(f));
-            Directory.Move(f, Path.Combine(Path.GetDirectoryName(f), Path.GetFileName(f) + "-renamed"));
+            ProgressWriteLine("Renaming folder {0}", Path.GetFileName(folderToRename));
+            Directory.Move(folderToRename, Path.Combine(Path.GetDirectoryName(folderToRename), Path.GetFileName(folderToRename) + "-renamed"));
 
             ProgressWriteLine("Running backup with renamed folder...");
             using (new Library.Logging.Timer(LOGTAG, "BackupWithRenamedFolder", "Backup with renamed folder"))
                 Duplicati.CommandLine.Program.RealMain(backupargs);
 
-            datafolders = Directory.EnumerateDirectories(DATAFOLDER);
+            datafolders = Directory.EnumerateDirectories(DATAFOLDER).ToList();
 
             ProgressWriteLine("Deleting data");
-            var rm1 = datafolders.First();
-            var rm2 = datafolders.Skip(1).First();
-            var rm3 = datafolders.Skip(2).First();
 
-            Directory.Delete(rm1, true);
-            Directory.Delete(rm2, true);
-            var rmfiles = Directory.EnumerateFiles(rm3, "*", SearchOption.AllDirectories);
+            Directory.Delete(datafolders[0], true);
+            Directory.Delete(datafolders[1], true);
+            var rmfiles = Directory.EnumerateFiles(datafolders[2], "*", SearchOption.AllDirectories);
             foreach (var n in rmfiles.Take(rmfiles.Count() / 2))
                 File.Delete(n);
 
@@ -207,8 +202,8 @@ namespace Duplicati.UnitTest
                 Duplicati.CommandLine.Program.RealMain((new string[] { "compact", target, "--small-file-max-count=2" }.Union(opts)).ToArray());
 
 
-            datafolders = Directory.EnumerateDirectories(DATAFOLDER);
-            var rf = datafolders.Skip(datafolders.Count() - 2).First();
+            datafolders = Directory.EnumerateDirectories(DATAFOLDER).ToList();
+            var rf = datafolders[datafolders.Count - 2];
 
             ProgressWriteLine("Partial restore of {0} ...", Path.GetFileName(rf));
             using (new Library.Logging.Timer(LOGTAG, "PartialRestore", "Partial restore"))

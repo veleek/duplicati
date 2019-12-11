@@ -38,15 +38,8 @@ chmod -R 755 ~/duplicati_testdata
 # run unit tests
 echo "travis_fold:start:unit_test"
 if [[ "$CATEGORY" != "GUI"  && "$CATEGORY" != "" ]]; then
-    dotnet test ./Duplicati/UnitTest/bin/Release/Duplicati.UnitTest.dll \
-    --where:cat==$CATEGORY --workers=1
+  echo "====================="
+  dotnet test ./Duplicati/UnitTest/Duplicati.UnitTest.csproj --no-build --filter Category=$CATEGORY --configuration Release
+  echo "====================="
 fi
 echo "travis_fold:end:unit_test"
-
-# start server and run gui tests
-echo "travis_fold:start:gui_unit_test"
-if [[ "$CATEGORY" == "GUI" ]]; then
-    dotnet ./Duplicati/GUI/Duplicati.GUI.TrayIcon/bin/Release/Duplicati.Server.exe &
-    python guiTests/guiTest.py
-fi
-echo "travis_fold:end:gui_unit_test"
