@@ -18,6 +18,8 @@
 using System;
 using System.Linq;
 using System.Threading;
+using System.Threading.Tasks;
+using Duplicati.Library.Utility;
 using Duplicati.Server.Serialization;
 
 namespace Duplicati.Server
@@ -27,11 +29,10 @@ namespace Duplicati.Server
     /// </summary>
     public class UpdatePollThread
     {
-        private readonly Thread m_thread;
-        private volatile bool m_terminated = false;
+        private CancellationTokenSource m_cancellationTokenSource;
+        private readonly Task m_task;
         private volatile bool m_download = false;
         private volatile bool m_forceCheck = false;
-        private readonly object m_lock = new object();
         private readonly AutoResetEvent m_waitSignal;
         private double m_downloadProgress;
 
@@ -55,29 +56,23 @@ namespace Duplicati.Server
         {
             m_waitSignal = new AutoResetEvent(false);
             ThreadState = UpdatePollerStates.Waiting;
-            m_thread = new Thread(Run);
-            m_thread.IsBackground = true;
-            m_thread.Name = "UpdatePollThread";
-            m_thread.Start();
+
+            m_cancellationTokenSource = new CancellationTokenSource();
+            CancellationToken cancellationToken = m_cancellationTokenSource.Token;
+            m_task = Task.Run(() => Run(cancellationToken), cancellationToken);
         }
 
         public void CheckNow()
         {
-            lock(m_lock)
-            {
-                m_forceCheck = true;
-                m_waitSignal.Set();
-            }
+            m_forceCheck = true;
+            m_waitSignal.Set();
         }
 
         public void InstallUpdate()
         {
-            lock(m_lock)
-            {
-                m_forceCheck = true;
-                m_download = true;
-                m_waitSignal.Set();
-            }
+            m_forceCheck = true;
+            m_download = true;
+            m_waitSignal.Set();
         }
 
         public void ActivateUpdate()
@@ -91,11 +86,8 @@ namespace Duplicati.Server
 
         public void Terminate()
         {
-            lock(m_lock)
-            {
-                m_terminated = true;
-                m_waitSignal.Set();
-            }
+            m_cancellationTokenSource.Cancel();
+            m_waitSignal.Set();
         }
 
         public void Reschedule()
@@ -103,19 +95,30 @@ namespace Duplicati.Server
             m_waitSignal.Set();
         }
 
-        private void Run()
+        private async Task Run(CancellationToken cancellationToken)
         {
-            // Wait on startup
-            m_waitSignal.WaitOne(TimeSpan.FromMinutes(1), true);
+            // Wait for a minute on startup
+            TimeSpan waitTime = TimeSpan.FromMinutes(1);
 
-            while (!m_terminated)
+            while (!cancellationToken.IsCancellationRequested)
             {
+                // Guard against spin-loop
+                if (waitTime.TotalSeconds < 5)
+                    waitTime = TimeSpan.FromSeconds(5);
+
+                // Guard against year-long waits
+                // A re-check does not cause an update check
+                if (waitTime.TotalDays > 1)
+                    waitTime = TimeSpan.FromDays(1);
+
+                await m_waitSignal.WaitOneAsync(waitTime);
+
                 var nextCheck = Program.DataConnection.ApplicationSettings.NextUpdateCheck;
 
                 var maxcheck = TimeSpan.FromDays(7);
                 try
                 {
-                    maxcheck = Library.Utility.Timeparser.ParseTimeSpan(Program.DataConnection.ApplicationSettings.UpdateCheckInterval);
+                    maxcheck = Timeparser.ParseTimeSpan(Program.DataConnection.ApplicationSettings.UpdateCheckInterval);
                 }
                 catch
                 {
@@ -127,8 +130,7 @@ namespace Duplicati.Server
 
                 if (nextCheck < DateTime.UtcNow || m_forceCheck)
                 {
-                    lock(m_lock)
-                        m_forceCheck = false;
+                    m_forceCheck = false;
 
                     ThreadState = UpdatePollerStates.Checking;
                     Program.StatusEventNotifyer.SignalNewEvent();
@@ -159,12 +161,11 @@ namespace Duplicati.Server
                     // In that case we discard the old update to avoid offering it.
                     if (Program.DataConnection.ApplicationSettings.UpdatedVersion != null)
                     {
-                        Library.AutoUpdater.ReleaseType updatert;
                         var updatertstring = Program.DataConnection.ApplicationSettings.UpdatedVersion.ReleaseType;
                         if (string.Equals(updatertstring, "preview", StringComparison.OrdinalIgnoreCase))
                             updatertstring = Library.AutoUpdater.ReleaseType.Experimental.ToString();
                         
-                        if (!Enum.TryParse<Library.AutoUpdater.ReleaseType>(updatertstring, true, out updatert))
+                        if (!Enum.TryParse(updatertstring, true, out Library.AutoUpdater.ReleaseType updatert))
                             updatert = Duplicati.Library.AutoUpdater.ReleaseType.Nightly;
 
                         if (updatert == Duplicati.Library.AutoUpdater.ReleaseType.Unknown)
@@ -195,8 +196,7 @@ namespace Duplicati.Server
 
                 if (m_download)
                 {
-                    lock(m_lock)
-                        m_download = false;
+                    m_download = false;
 
                     var v = Program.DataConnection.ApplicationSettings.UpdatedVersion;
                     if (v != null)
@@ -217,19 +217,8 @@ namespace Duplicati.Server
                     Program.StatusEventNotifyer.SignalNewEvent();
                 }
 
-                var waitTime = nextCheck - DateTime.UtcNow;
-
-                // Guard against spin-loop
-                if (waitTime.TotalSeconds < 5)
-                    waitTime = TimeSpan.FromSeconds(5);
-                
-                // Guard against year-long waits
-                // A re-check does not cause an update check
-                if (waitTime.TotalDays > 1)
-                    waitTime = TimeSpan.FromDays(1);
-                
-                m_waitSignal.WaitOne(waitTime, true);
-            }   
+                waitTime = nextCheck - DateTime.UtcNow;
+            }
         }
     }
 }

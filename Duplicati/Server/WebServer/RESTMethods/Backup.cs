@@ -661,8 +661,7 @@ namespace Duplicati.Server.WebServer.RESTMethods
                         for(int i = 0; i < 10; i++)
                             if (Program.WorkThread.Active)
                             {
-                                var t = Program.WorkThread.CurrentTask;
-                                if (backup.Equals(t == null ? null : t.Backup))
+                                if (backup == Program.WorkThread.CurrentTask?.Backup)
                                     System.Threading.Thread.Sleep(1000);
                                 else
                                     break;
@@ -672,8 +671,7 @@ namespace Duplicati.Server.WebServer.RESTMethods
 
                         if (Program.WorkThread.Active)
                         {
-                            var t = Program.WorkThread.CurrentTask;
-                            if (backup.Equals(t == null ? null : t.Backup))
+                            if (backup == Program.WorkThread.CurrentTask?.Backup)
                             {
                                 if (hasPaused)
                                     Program.LiveControl.Resume();

@@ -9,6 +9,7 @@ using Duplicati.Library.Main.Volumes;
 using Newtonsoft.Json;
 using Duplicati.Library.Localization.Short;
 using System.Threading;
+using System.Threading.Tasks;
 
 namespace Duplicati.Library.Main
 {
@@ -356,7 +357,8 @@ namespace Duplicati.Library.Main
         private Library.Interface.IBackend m_backend;
         private readonly string m_backendurl;
         private readonly IBackendWriter m_statwriter;
-        private System.Threading.Thread m_thread;
+        private Task m_task;
+        private CancellationTokenSource m_cancellationTokenSource;
         private readonly BasicResults m_taskControl;
         private readonly DatabaseCollector m_db;
 
@@ -402,13 +404,13 @@ namespace Duplicati.Library.Main
             if (m_taskControl != null)
                 m_taskControl.StateChangedEvent += (state) => {
                     if (state == TaskControlState.Abort)
-                        m_thread.Abort();
+                        m_cancellationTokenSource.Cancel();
                 };
             m_queue = new BlockingQueue<FileEntryItem>(options.SynchronousUpload ? 1 : (options.AsynchronousUploadLimit == 0 ? int.MaxValue : options.AsynchronousUploadLimit));
-            m_thread = new System.Threading.Thread(this.ThreadRun);
-            m_thread.Name = "Backend Async Worker";
-            m_thread.IsBackground = true;
-            m_thread.Start();
+
+            m_cancellationTokenSource = new CancellationTokenSource();
+            CancellationToken cancellationToken = m_cancellationTokenSource.Token;
+            m_task = Task.Run(() => this.ThreadRun(cancellationToken), cancellationToken);
         }
 
         public static string CalculateFileHash(string filename)
@@ -448,10 +450,10 @@ namespace Duplicati.Library.Main
         }
 
 
-        private void ThreadRun()
+        private void ThreadRun(CancellationToken cancellationToken)
         {
             var uploadSuccess = false;
-            while (!m_queue.Completed)
+            while (!m_queue.Completed && !cancellationToken.IsCancellationRequested)
             {
                 var item = m_queue.Dequeue();
                 if (item != null)
@@ -1483,15 +1485,11 @@ namespace Duplicati.Library.Main
             if (m_queue != null && !m_queue.Completed)
                 m_queue.SetCompleted();
 
-            if (m_thread != null)
+            if (m_task != null)
             {
-                if (!m_thread.Join(TimeSpan.FromSeconds(10)))
-                {
-                    m_thread.Abort();
-                    m_thread.Join(TimeSpan.FromSeconds(10));
-                }
-
-                m_thread = null;
+                m_cancellationTokenSource.Cancel();
+                m_task.Wait(TimeSpan.FromSeconds(10));
+                m_task = null;
             }
 
             //TODO: We cannot null this, because it will be recreated

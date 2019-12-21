@@ -46,8 +46,8 @@ namespace Duplicati.Server
             public IDictionary<string, string> ExtraOptions { get; internal set; }
             public string[] FilterStrings { get; internal set; }
 
-            public string BackupID { get { return Backup.ID; } }
-            public long TaskID { get { return m_taskID; } }
+            public string BackupID => Backup.ID;
+            public long TaskID { get; }
 
             internal Duplicati.Library.Main.Controller Controller { get; set; }
 
@@ -65,23 +65,17 @@ namespace Duplicati.Server
 
             public void Abort()
             {
-                var c = Controller;
-                if (c != null)
-                    c.Abort();
+                Controller?.Abort();
             }
 
             public void Pause()
             {
-                var c = Controller;
-                if (c != null)
-                    c.Pause();
+                Controller?.Pause();
             }
 
             public void Resume()
             {
-                var c = Controller;
-                if (c != null)
-                    c.Resume();
+                Controller?.Resume();
             }
 
             public long OriginalUploadSpeed { get; set; }
@@ -126,11 +120,9 @@ namespace Duplicati.Server
                 controller.MaxDownloadSpeed = download_throttle;
             }
 
-            private readonly long m_taskID;
-
             public RunnerData()
             {
-                m_taskID = System.Threading.Interlocked.Increment(ref RunnerTaskID);
+                TaskID = System.Threading.Interlocked.Increment(ref RunnerTaskID);
             }
         }
 
@@ -489,7 +481,7 @@ namespace Duplicati.Server
                     }
                     catch { }
 
-                    ((RunnerData)data).Controller = controller;
+                    data.SetController(controller);
                     data.UpdateThrottleSpeed();
 
                     if (backup.Metadata.ContainsKey("LastCompactFinished"))
@@ -631,7 +623,7 @@ namespace Duplicati.Server
             }
             finally
             {
-                ((RunnerData)data).Controller = null;
+                data.SetController(null);
             }
         }
 

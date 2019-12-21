@@ -719,15 +719,13 @@ namespace Duplicati.Server
                 case LiveControls.LiveControlState.Paused:
                     {
                         WorkThread.Pause();
-                        var t = WorkThread.CurrentTask;
-                        t?.Pause();
+                        WorkThread.CurrentTask?.Pause();
                         break;
                     }
                 case LiveControls.LiveControlState.Running:
                     {
                         WorkThread.Resume();
-                        var t = WorkThread.CurrentTask;
-                        t?.Resume();
+                        WorkThread.CurrentTask?.Resume();
                         break;
                     }
             }

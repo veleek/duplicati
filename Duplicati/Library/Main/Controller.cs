@@ -25,6 +25,8 @@ using System.Collections.Generic;
 using Duplicati.Library.Utility;
 using Duplicati.Library.Common.IO;
 using Duplicati.Library.Common;
+using System.Threading.Tasks;
+using System.Threading;
 
 namespace Duplicati.Library.Main
 {
@@ -53,9 +55,9 @@ namespace Duplicati.Library.Main
         private ITaskControl m_currentTask = null;
 
         /// <summary>
-        /// The thread running the current task
+        /// A cancellation token for the current task
         /// </summary>
-        private System.Threading.Thread m_currentTaskThread = null;
+        private CancellationTokenSource m_currentTaskCancellationTokenSource;
 
         /// <summary>
         /// The thread priority to reset to
@@ -400,7 +402,7 @@ namespace Duplicati.Library.Main
                 try
                 {
                     m_currentTask = result;
-                    m_currentTaskThread = System.Threading.Thread.CurrentThread;
+                    m_currentTaskCancellationTokenSource = new CancellationTokenSource();
 
                     SetupCommonOptions(result, ref paths, ref filter);
                     Logging.Log.WriteInformationMessage(LOGTAG, "StartingOperation", Strings.Controller.StartingOperationMessage(m_options.MainAction));
@@ -452,7 +454,7 @@ namespace Duplicati.Library.Main
                 finally
                 {
                     m_currentTask = null;
-                    m_currentTaskThread = null;
+                    m_currentTaskCancellationTokenSource = null;
                 }
             }
         }
@@ -1081,13 +1083,8 @@ namespace Duplicati.Library.Main
 
         public void Abort()
         {
-            var ct = m_currentTask;
-            if (ct != null)
-                ct.Abort();
-
-            var t = m_currentTaskThread;
-            if (t != null)
-                t.Abort();
+            m_currentTask?.Abort();
+            m_currentTaskCancellationTokenSource?.Cancel();
         }
 
         public long MaxUploadSpeed

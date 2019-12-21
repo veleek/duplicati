@@ -1,9 +1,13 @@
 ﻿using System;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Linq;
 using System.Net;
 using System.Text;
+using System.Threading;
+using System.Threading.Tasks;
 using Duplicati.Library.Common.IO;
+using static Duplicati.Library.Utility.AsyncExtensions;
 using Duplicati.Server.Serialization;
 using Duplicati.Server.Serialization.Interface;
 
@@ -41,7 +45,7 @@ namespace Duplicati.GUI.TrayIcon
         private readonly bool m_saltedpassword;
         private string m_authtoken;
         private string m_xsrftoken;
-        private static readonly System.Text.Encoding ENCODING = System.Text.Encoding.GetEncoding("utf-8");
+        private static readonly Encoding ENCODING = Encoding.GetEncoding("utf-8");
 
         public delegate void StatusUpdateDelegate(IServerStatus status);
         public event StatusUpdateDelegate OnStatusUpdated;
@@ -54,22 +58,21 @@ namespace Duplicati.GUI.TrayIcon
         private long m_lastDataUpdateId = -1;
         private bool m_disableTrayIconLogin;
 
-        private volatile IServerStatus m_status;
 
-        private volatile bool m_shutdown = false;
-        private volatile System.Threading.Thread m_requestThread;
-        private volatile System.Threading.Thread m_pollThread;
-        private readonly System.Threading.AutoResetEvent m_waitLock;
+        private readonly CancellationTokenSource m_shutdown;
+        private readonly Task m_requestTask;
+        private readonly Task m_pollTask;
+        private readonly AutoResetEvent m_workQueueDataAvailable = new AutoResetEvent(false);
+        private readonly ConcurrentQueue<BackgroundRequest> m_workQueue = new ConcurrentQueue<BackgroundRequest>();
 
-        private readonly Dictionary<string, string> m_updateRequest;
         private readonly Dictionary<string, string> m_options;
         private readonly Program.PasswordSource m_passwordSource;
+        
         private string m_TrayIconHeaderValue => (m_passwordSource == Program.PasswordSource.Database) ? "database" : "user";
 
-        public IServerStatus Status { get { return m_status; } }
+        private volatile IServerStatus m_status;
 
-        private readonly object m_lock = new object();
-        private readonly Queue<BackgroundRequest> m_workQueue = new Queue<BackgroundRequest>();
+        public IServerStatus Status => m_status;
 
         public HttpServerConnection(Uri server, string password, bool saltedpassword, Program.PasswordSource passwordSource, bool disableTrayIconLogin, Dictionary<string, string> options)
         {
@@ -86,35 +89,68 @@ namespace Duplicati.GUI.TrayIcon
             m_options = options;
             m_passwordSource = passwordSource;
 
-            m_updateRequest = new Dictionary<string, string>();
-            m_updateRequest["longpoll"] = "false";
-            m_updateRequest["lasteventid"] = "0";
-
-            UpdateStatus();
-
-            //We do the first request without long poll,
-            // and all the rest with longpoll
-            m_updateRequest["longpoll"] = "true";
-            m_updateRequest["duration"] = "5m";
-            
-            m_waitLock = new System.Threading.AutoResetEvent(false);
-            m_requestThread = new System.Threading.Thread(ThreadRunner);
-            m_pollThread = new System.Threading.Thread(LongPollRunner);
-
-            m_requestThread.Name = "TrayIcon Request Thread";
-            m_pollThread.Name = "TrayIcon Longpoll Thread";
-
-            m_requestThread.Start();
-            m_pollThread.Start();
+            m_shutdown = new CancellationTokenSource();
+            CancellationToken cancellationToken = m_shutdown.Token;
+            m_requestTask = Task.Run(() => ThreadRunner(cancellationToken), cancellationToken);
+            m_pollTask = Task.Run(() => LongPollRunner(cancellationToken), cancellationToken);
         }
 
-        private void UpdateStatus()
+        private void UpdateNotifications()
         {
-            m_status = PerformRequest<IServerStatus>("GET", "/serverstate", m_updateRequest);
-            m_updateRequest["lasteventid"] = m_status.LastEventID.ToString();
+            var req = new Dictionary<string, string>();
+            var notifications = PerformRequest<INotification[]>("GET", "/notifications", req);
+            if (notifications != null && notifications.Any())
+            {
+                foreach(var n in notifications.Where(x => x.Timestamp > m_firstNotificationTime))
+                    OnNotification?.Invoke(n);
 
-            if (OnStatusUpdated != null)
-                OnStatusUpdated(m_status);
+                m_firstNotificationTime = notifications.Max(n => n.Timestamp);
+            }
+        }
+
+        private void UpdateApplicationSettings()
+        {
+            var req = new Dictionary<string, string>();
+            var settings = PerformRequest<Dictionary<string, string>>("GET", "/serversettings", req);
+            if (settings != null && settings.TryGetValue("disable-tray-icon-login", out var str))
+                m_disableTrayIconLogin = Library.Utility.Utility.ParseBool(str, false);
+        }
+
+        private void LongPollRunner(CancellationToken cancellationToken)
+        {
+            Dictionary<string, string> updateRequest = new Dictionary<string, string>
+            {
+                ["longpoll"] = "false",
+                ["lasteventid"] = "0"
+            };
+
+            // Send an initial status update without long poll.
+            UpdateStatus(updateRequest);
+
+            // And then use longpoll for the rest of the updates.
+            updateRequest["longpoll"] = "true";
+            updateRequest["duration"] = "5m";
+
+            while (!cancellationToken.IsCancellationRequested)
+            {
+                try
+                {
+                    UpdateStatus(updateRequest);
+                }
+                catch (Exception ex)
+                {
+                    System.Diagnostics.Trace.WriteLine("Request error: " + ex.Message);
+                    Library.Logging.Log.WriteWarningMessage(LOGTAG, "TrayIconRequestError", ex, "Failed to get response");
+                }
+            }
+        }
+
+        private void UpdateStatus(Dictionary<string, string> updateRequest)
+        {
+            m_status = PerformRequest<IServerStatus>("GET", "/serverstate", updateRequest);
+            updateRequest["lasteventid"] = m_status.LastEventID.ToString();
+
+            OnStatusUpdated?.Invoke(m_status);
 
             if (m_lastNotificationId != m_status.LastNotificationUpdateID)
             {
@@ -129,94 +165,32 @@ namespace Duplicati.GUI.TrayIcon
             }
         }
 
-        private void UpdateNotifications()
+        private async Task ThreadRunner(CancellationToken cancellationToken)
         {
-            var req = new Dictionary<string, string>();
-            var notifications = PerformRequest<INotification[]>("GET", "/notifications", req);
-            if (notifications != null)
+            while (!cancellationToken.IsCancellationRequested)
             {
-                foreach(var n in notifications.Where(x => x.Timestamp > m_firstNotificationTime))
-                    if (OnNotification != null)
-                        OnNotification(n);
+                if (!m_workQueue.TryDequeue(out BackgroundRequest req))
+                {
+                    await Task.WhenAny(m_workQueueDataAvailable.WaitOneAsync(), cancellationToken.WhenCancelled());
+                    continue;
+                }
 
-                if (notifications.Any())
-                    m_firstNotificationTime = notifications.Select(x => x.Timestamp).Max();
-            }
-        }
-
-        private void UpdateApplicationSettings()
-        {
-            var req = new Dictionary<string, string>();
-            var settings = PerformRequest<Dictionary<string, string>>("GET", "/serversettings", req);
-            if (settings != null && settings.TryGetValue("disable-tray-icon-login", out var str))
-                m_disableTrayIconLogin = Library.Utility.Utility.ParseBool(str, false);
-        }
-
-        private void LongPollRunner()
-        {
-            while (!m_shutdown)
-            {
                 try
                 {
-                    UpdateStatus();
+                    PerformRequest<string>(req.Method, req.Endpoint, req.Query);
                 }
                 catch (Exception ex)
                 {
                     System.Diagnostics.Trace.WriteLine("Request error: " + ex.Message);
-					Library.Logging.Log.WriteWarningMessage(LOGTAG, "TrayIconRequestError", ex, "Failed to get response");
-                }
-            }
-        }
-
-        private void ThreadRunner()
-        {
-            while (!m_shutdown)
-            {
-                try
-                {
-                    BackgroundRequest req;
-                    bool any = false;
-                    do
-                    {
-                        req = null;
-
-                        lock (m_lock)
-                            if (m_workQueue.Count > 0)
-                                req = m_workQueue.Dequeue();
-
-                        if (m_shutdown)
-                            break;
-
-                        if (req != null)
-                        {
-                            any = true;
-                            PerformRequest<string>(req.Method, req.Endpoint, req.Query);
-                        }
-                    
-                    } while (req != null);
-                    
-                    if (!(any || m_shutdown))
-                        m_waitLock.WaitOne(TimeSpan.FromMinutes(1), true);
-                }
-                catch (Exception ex)
-                {
-                    System.Diagnostics.Trace.WriteLine("Request error: " + ex.Message);
-					Library.Logging.Log.WriteWarningMessage(LOGTAG, "TrayIconRequestError", ex, "Failed to get response");
+                    Library.Logging.Log.WriteWarningMessage(LOGTAG, "TrayIconRequestError", ex, "Failed to get response");
                 }
             }
         }
 
         public void Close()
         {
-            m_shutdown = true;
-            m_waitLock.Set();
-            m_pollThread.Abort();
-            m_pollThread.Join(TimeSpan.FromSeconds(10));
-            if (!m_requestThread.Join(TimeSpan.FromSeconds(10)))
-            {
-                m_requestThread.Abort();
-                m_requestThread.Join(TimeSpan.FromSeconds(10));
-            }
+            m_shutdown.Cancel();
+            Task.WaitAll(new[] { m_pollTask, m_requestTask }, TimeSpan.FromSeconds(10));
         }
 
         private static string EncodeQueryString(Dictionary<string, string> dict)
@@ -469,11 +443,8 @@ namespace Duplicati.GUI.TrayIcon
 
         private void ExecuteAndNotify(string method, string urifragment, Dictionary<string, string> req)
         {
-            lock (m_lock)
-            {
-                m_workQueue.Enqueue(new BackgroundRequest(method, urifragment, req));
-                m_waitLock.Set();
-            }
+            m_workQueue.Enqueue(new BackgroundRequest(method, urifragment, req));
+            m_workQueueDataAvailable.Set();
         }
 
         public void Pause(string duration = null)

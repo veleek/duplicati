@@ -425,8 +425,6 @@ namespace Duplicati.Library.Utility
             return parent;
         }
 
-        
-
         /// <summary>
         /// Given a collection of unique folders, returns only parent-most folders
         /// </summary>
@@ -471,7 +469,7 @@ namespace Duplicati.Library.Utility
 
             return result.Distinct();
         }
-        
+
         /// <summary>
         /// Given a collection of file paths, return those NOT contained within specified collection of folders
         /// </summary>

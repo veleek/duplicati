@@ -26,6 +26,7 @@ using System.Text;
 using System.Linq;
 using System.Threading;
 using Duplicati.Library.Utility;
+using System.Threading.Tasks;
 
 namespace Duplicati.Server
 {
@@ -39,11 +40,11 @@ namespace Duplicati.Server
         /// <summary>
         /// The thread that runs the scheduler
         /// </summary>
-        private readonly Thread m_thread;
+        private readonly Task m_task;
         /// <summary>
         /// A termination flag
         /// </summary>
-        private volatile bool m_terminate;
+        private readonly CancellationTokenSource m_cancellationTokenSource;
         /// <summary>
         /// The worker thread that is invoked to do work
         /// </summary>
@@ -78,16 +79,16 @@ namespace Duplicati.Server
         /// <param name="worker">The worker thread</param>
         public Scheduler(WorkerThread<Server.Runner.IRunnerData> worker)
         {
-            m_thread = new Thread(new ThreadStart(Runner));
             m_worker = worker;
             m_worker.CompletedWork += OnCompleted;
             m_schedule = new KeyValuePair<DateTime, ISchedule>[0];
-            m_terminate = false;
+            
             m_event = new AutoResetEvent(false);
             m_updateTasks = new Dictionary<Server.Runner.IRunnerData, Tuple<ISchedule, DateTime, DateTime>>();
-            m_thread.IsBackground = true;
-            m_thread.Name = "TaskScheduler";
-            m_thread.Start();
+
+            m_cancellationTokenSource = new CancellationTokenSource();
+            CancellationToken cancellationToken = m_cancellationTokenSource.Token;
+            m_task = Task.Run(() => Runner(cancellationToken), cancellationToken);
         }
 
         /// <summary>
@@ -128,11 +129,13 @@ namespace Duplicati.Server
         /// <param name="wait">True if the call should block until the thread has exited, false otherwise</param>
         public void Terminate(bool wait)
         {
-            m_terminate = true;
+            m_cancellationTokenSource.Cancel();
             m_event.Set();
 
             if (wait)
-                m_thread.Join();
+            {
+                m_task.Wait();
+            }
         }
 
         /// <summary>
@@ -215,10 +218,10 @@ namespace Duplicati.Server
         /// <summary>
         /// The actual scheduling procedure
         /// </summary>
-        private void Runner()
+        private void Runner(CancellationToken cancellationToken)
         {
             var scheduled = new Dictionary<long, KeyValuePair<long, DateTime>>();
-            while (!m_terminate)
+            while (!cancellationToken.IsCancellationRequested)
             {
                 //TODO: As this is executed repeatedly we should cache it
                 // to avoid frequent db lookups

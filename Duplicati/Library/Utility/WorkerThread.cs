@@ -18,9 +18,11 @@
 // 
 #endregion
 using System;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Text;
 using System.Threading;
+using System.Threading.Tasks;
 
 namespace Duplicati.Library.Utility
 {
@@ -41,15 +43,15 @@ namespace Duplicati.Library.Utility
         /// <summary>
         /// The internal list of tasks to perform
         /// </summary>
-        private Queue<Tx> m_tasks;
+        private ConcurrentQueue<Tx> m_tasks;
         /// <summary>
         /// A flag used to terminate the thread
         /// </summary>
-        private volatile bool m_terminate;
+        private CancellationTokenSource m_cancellationTokenSource;
         /// <summary>
         /// The coordinating thread
         /// </summary>
-        private Thread m_thread;
+        private Task m_runnerTask;
 
         /// <summary>
         /// A value indicating if the coordinating thread is running
@@ -69,7 +71,6 @@ namespace Duplicati.Library.Utility
         /// An event that is raised when the runner state changes
         /// </summary>
         public event Action<WorkerThread<Tx>, RunState> WorkerStateChanged;
-
         /// <summary>
         /// Event that occurs when a new operation is being processed
         /// </summary>
@@ -115,14 +116,12 @@ namespace Duplicati.Library.Utility
         {
             m_delegate = item;
             m_event = new AutoResetEvent(paused);
-            m_terminate = false;
-            m_tasks = new Queue<Tx>();
-            m_state = paused ? WorkerThread<Tx>.RunState.Paused : WorkerThread<Tx>.RunState.Run;
+            m_tasks = new ConcurrentQueue<Tx>();
+            m_state = paused ? RunState.Paused : RunState.Run;
 
-            m_thread = new Thread(new ThreadStart(Runner));
-            m_thread.IsBackground = true;
-            m_thread.Name = "WorkerThread<" + typeof(Tx).Name + ">";
-            m_thread.Start();
+            m_cancellationTokenSource = new CancellationTokenSource();
+            CancellationToken cancellationToken = m_cancellationTokenSource.Token;
+            m_runnerTask = Task.Run(() => Runner(cancellationToken), cancellationToken);
         }
 
         /// <summary>
@@ -132,10 +131,18 @@ namespace Duplicati.Library.Utility
         {
             get
             {
-                lock(m_lock)
-                    return new List<Tx>(m_tasks);
+                return new List<Tx>(m_tasks.ToArray());
             }
 
+        }
+
+        /// <summary>
+        /// Gets the current run state
+        /// </summary>
+        private void SetState(RunState value)
+        {
+            m_state = value;
+            m_event.Set();
         }
 
         /// <summary>
@@ -152,14 +159,10 @@ namespace Duplicati.Library.Utility
         /// <param name="task">The task to add</param>
         public void AddTask(Tx task)
         {
-            lock (m_lock)
-            {
-                m_tasks.Enqueue(task);
-                m_event.Set();
-            }
+            m_tasks.Enqueue(task);
+            m_event.Set();
 
-            if (WorkQueueChanged != null)
-                WorkQueueChanged(this);
+            WorkQueueChanged?.Invoke(this);
         }
 
         /// <summary>
@@ -178,69 +181,44 @@ namespace Duplicati.Library.Utility
                 return;
             }
 
-            lock (m_lock)
+            ConcurrentQueue<Tx> newQueue = new ConcurrentQueue<Tx>();
+            newQueue.Enqueue(task);
+
+            var oldTasks = m_tasks;
+            m_tasks = newQueue;
+
+            while (oldTasks.TryDequeue(out Tx n))
             {
-                Queue<Tx> newQueue = new Queue<Tx>();
-                newQueue.Enqueue(task);
-                while (m_tasks.Count > 0)
-                {
-                    Tx n = m_tasks.Dequeue();
-                    newQueue.Enqueue(n);
-                }
-                m_tasks = newQueue;
-                m_event.Set();
+                m_tasks.Enqueue(n);
             }
 
-            if (WorkQueueChanged != null)
-                WorkQueueChanged(this);
-        }
+            m_event.Set();
 
-
-        /// <summary>
-        /// Removes a task from the queue, does not remove the task if it is currently running
-        /// </summary>
-        /// <param name="task">The task to remove</param>
-        public void RemoveTask(Tx task)
-        {
-            lock (m_lock)
-            {
-                Queue<Tx> tmp = new Queue<Tx>();
-                while (m_tasks.Count > 0)
-                {
-                    Tx n = m_tasks.Dequeue();
-                    if (n != task)
-                        tmp.Enqueue(n);
-                }
-
-                m_tasks = tmp;
-            }
-
-            if (WorkQueueChanged != null)
-                WorkQueueChanged(this);
+            WorkQueueChanged?.Invoke(this);
         }
 
         /// <summary>
         /// This will clear the pending queue
-        /// <param name="abortThread">True if the current running thread should be aborted</param>
+        /// <param name="cancelTask">True if the current running task should be cancelled</param>
         /// </summary>
-        public void ClearQueue(bool abortThread)
+        public void ClearQueue(bool cancelTask)
         {
-            lock (m_lock)
-                m_tasks.Clear();
+            m_tasks = new ConcurrentQueue<Tx>();
 
-            if (abortThread)
-            {
+            if (cancelTask)
+            {   
                 try
                 {
-                    m_thread.Abort();
-                    m_thread.Join(500);
+                    m_cancellationTokenSource.Cancel();
+                    m_runnerTask.Wait(500);
                 }
                 catch
                 {
                 }
 
-                m_thread = new Thread(new ThreadStart(Runner));
-                m_thread.Start();
+                m_cancellationTokenSource = new CancellationTokenSource();
+                CancellationToken cancellationToken = m_cancellationTokenSource.Token;
+                m_runnerTask = Task.Run(() => Runner(cancellationToken), cancellationToken);
             }
         }
 
@@ -262,60 +240,33 @@ namespace Duplicati.Library.Utility
         /// <param name="wait">True if the call should block until the thread has exited, false otherwise</param>
         public void Terminate(bool wait)
         {
-            m_terminate = true;
+            m_cancellationTokenSource.Cancel();
             m_event.Set();
 
             if (wait)
-                m_thread.Join();
+                m_runnerTask.Wait();
         }
 
         /// <summary>
         /// This is the thread entry point
         /// </summary>
-        private void Runner()
+        private async Task Runner(CancellationToken cancellationToken)
         {
-            while (!m_terminate)
+            while (!cancellationToken.IsCancellationRequested)
             {
-                m_currentTask = null;
-
-                lock(m_lock)
-                    if (m_state == WorkerThread<Tx>.RunState.Run && m_tasks.Count > 0)
-                        m_currentTask = m_tasks.Dequeue();
-
-                if (m_currentTask == null && !m_terminate)
-                if (m_state == WorkerThread<Tx>.RunState.Run)
-                    m_event.WaitOne(); //Sleep until signaled
-                    else
+                if (m_state != RunState.Run)
                 {
-                    if (WorkerStateChanged != null)
-                        WorkerStateChanged(this, m_state);
-
-                    //Sleep for brief periods, until signaled
-                    while (!m_terminate && m_state != WorkerThread<Tx>.RunState.Run)
-                        m_event.WaitOne(1000 * 60 * 5, false);
-
-                    //If we were not terminated, we are now ready to run
-                    if (!m_terminate)
-                    {
-                        m_state = WorkerThread<Tx>.RunState.Run;
-                        if (WorkerStateChanged != null)
-                            WorkerStateChanged(this, m_state);
-                    }
+                    await WaitForRunState(cancellationToken);
+                    continue;
                 }
 
-                if (m_terminate)
-                    return;
-
-                if (m_currentTask == null && m_state == WorkerThread<Tx>.RunState.Run)
-                    lock(m_lock)
-                        if (m_tasks.Count > 0)
-                            m_currentTask = m_tasks.Dequeue();
-
-                if (m_currentTask == null)
+                if (!m_tasks.TryDequeue(out m_currentTask))
+                {
+                    await m_event.WaitOneAsync();
                     continue;
+                };
 
-                if (StartingWork != null)
-                    StartingWork(this, m_currentTask);
+                StartingWork?.Invoke(this, m_currentTask);
 
                 try
                 {
@@ -324,46 +275,60 @@ namespace Duplicati.Library.Utility
                 }
                 catch (Exception ex)
                 {
-                    try { System.Threading.Thread.ResetAbort(); }
-                    catch { }
-
                     if (OnError != null)
+                    {
                         try { OnError(this, m_currentTask, ex); }
                         catch { }
+                    }
                 }
                 finally
                 {
-                    try { System.Threading.Thread.ResetAbort(); }
-                    catch { }
-
                     m_active = false;
                 }
 
                 var task = m_currentTask;
                 m_currentTask = null;
 
-                if (CompletedWork != null)
-                    try { CompletedWork(this, task); }
-                    catch (Exception ex) 
-                    {
-                        try { OnError(this, task, ex); }
-                        catch { }
-                    }
+                try 
+                {
+                    CompletedWork?.Invoke(this, task);
+                }
+                catch (Exception ex)
+                {
+                    try { OnError(this, task, ex); }
+                    catch { }
+                }
             }
         }
 
-        /// <summary>
-        /// Gets the current run state
-        /// </summary>
-        public RunState State { get { return m_state; } }
+        private async Task WaitForRunState(CancellationToken cancellationToken)
+        {
+            WorkerStateChanged?.Invoke(this, m_state);
+
+            //Sleep for brief periods, until signaled
+            while (!cancellationToken.IsCancellationRequested && m_state != RunState.Run)
+            {
+                await Task.WhenAny(
+                    cancellationToken.WhenCancelled(),
+                    m_event.WaitOneAsync(TimeSpan.FromMinutes(5))
+                );
+            }
+
+            if (cancellationToken.IsCancellationRequested)
+            {
+                return;
+            }
+
+            //If we were not terminated, we are now ready to run
+            WorkerStateChanged?.Invoke(this, m_state);
+        }
 
         /// <summary>
         /// Instructs Duplicati to run scheduled backups
         /// </summary>
         public void Resume()
         {
-            m_state = RunState.Run;
-            m_event.Set();
+            SetState(RunState.Run);
         }
 
         /// <summary>
@@ -371,20 +336,7 @@ namespace Duplicati.Library.Utility
         /// </summary>
         public void Pause()
         {
-            m_state = RunState.Paused;
-            m_event.Set();
-        }
-
-        /// <summary>
-        /// Waits the specified number of milliseconds for the thread to terminate
-        /// </summary>
-        /// <param name="millisecondTimeout">The number of milliseconds to wait</param>
-        /// <returns>True if the thread is terminated, false if a timeout occured</returns>
-        public bool Join(int millisecondTimeout)
-        {
-            if (m_thread != null)
-                return m_thread.Join(millisecondTimeout);
-            return true;
+            SetState(RunState.Paused);
         }
     }
 }
