@@ -261,7 +261,7 @@ namespace Duplicati.Library.Modules.Builtin
                 var records = new List<MXRecord>();
                 foreach (var s in dnslist)
                 {
-                    var res = dnslite.getMXRecords(toMailDomain, s);
+                    var res = dnslite.getMXRecords(toMailDomain, s).Result;
                     if (res != null)
                         records.AddRange(res.OfType<MXRecord>());
                 }
