@@ -4,11 +4,12 @@
     csc /target:library /out:DnsLib.dll /keyfile:..\..\Duplicati\GUI\Duplicati.snk DnsLite.cs 
 */ 
 using System; 
-using System.Net; 
 using System.IO; 
 using System.Text; 
 using System.Net.Sockets; 
-using System.Collections;
+using System.Collections.Generic;
+using System.Threading.Tasks;
+
 namespace DnsLib
 {
     public class MXRecord
@@ -20,101 +21,80 @@ namespace DnsLib
             return "Preference : " + preference + " Exchange : " + exchange;
         }
     }
+
     public class DnsLite
     {
-        private byte[] data;
-        private int position, id, length;
-        private string name;
-        private ArrayList dnsServers;
-        private static int DNS_PORT = 53;
-        readonly Encoding ASCII = Encoding.ASCII;
-        public DnsLite()
-        {
-            id = DateTime.Now.Millisecond * 60;
-            dnsServers = new ArrayList();
+        private const int DNS_PORT = 53;
+        private static readonly Encoding ASCII = Encoding.ASCII;
 
-        }
-        public void setDnsServers(ArrayList dnsServers)
-        {
-            this.dnsServers = dnsServers;
-        }
-        public ArrayList getMXRecords(string host)
-        {
-            ArrayList mxRecords = null;
-            for (int i = 0; i < dnsServers.Count; i++)
-            {
-                try
-                {
-                    mxRecords = getMXRecords(host, (string)dnsServers[i]);
-                    break;
-                }
-                catch (IOException)
-                {
-                    continue;
-                }
-            }
-            return mxRecords;
-        }
+        private int id = DateTime.Now.Millisecond * 60;
+        private byte[] data;
+        private int position;
+        private int length;
+        private string name;
+        
         private int getNewId()
         {
             //return a new id 
             return ++id;
         }
-        public ArrayList getMXRecords(string host, string serverAddress)
+
+        public async Task<List<MXRecord>> getMXRecords(string host, string serverAddress)
         {
             //opening the UDP socket at DNS server 
             //use UDPClient, if you are still with Beta1 
             UdpClient dnsClient = new UdpClient(serverAddress, DNS_PORT);
             //preparing the DNS query packet. 
-            makeQuery(getNewId(), host);
+            byte[] query = makeQuery(getNewId(), host);
             //send the data packet 
-            dnsClient.Send(data, data.Length);
+            await dnsClient.SendAsync(query, query.Length);
 
-            // 2017-01-09: Fix not sending null to UDPClient.Receive
-            IPEndPoint endpoint = new IPEndPoint(IPAddress.Loopback, DNS_PORT);
             //receive the data packet from DNS server 
-            data = dnsClient.Receive(ref endpoint);
-            length = data.Length;
-            //un pack the byte array & makes an array of MXRecord objects. 
-            return makeResponse();
+            var result = await dnsClient.ReceiveAsync();
+            return makeResponse(result.Buffer);
         }
+
         //for packing the information to the format accepted by server 
-        public void makeQuery(int id, String name)
+        private byte[] makeQuery(int id, String name)
         {
-            data = new byte[512];
+            var query = new byte[512];
             for (int i = 0; i < 512; ++i)
             {
-                data[i] = 0;
+                query[i] = 0;
             }
-            data[0] = (byte)(id >> 8);
-            data[1] = (byte)(id & 0xFF);
-            data[2] = 1; data[3] = 0;
-            data[4] = 0; data[5] = 1;
-            data[6] = 0; data[7] = 0;
-            data[8] = 0; data[9] = 0;
-            data[10] = 0; data[11] = 0;
+            query[0] = (byte)(id >> 8);
+            query[1] = (byte)(id & 0xFF);
+            query[2] = 1; query[3] = 0;
+            query[4] = 0; query[5] = 1;
+            query[6] = 0; query[7] = 0;
+            query[8] = 0; query[9] = 0;
+            query[10] = 0; query[11] = 0;
             string[] tokens = name.Split(new char[] { '.' });
             string label;
             position = 12;
             for (int j = 0; j < tokens.Length; j++)
             {
                 label = tokens[j];
-                data[position++] = (byte)(label.Length & 0xFF);
+                query[position++] = (byte)(label.Length & 0xFF);
                 byte[] b = ASCII.GetBytes(label);
                 for (int k = 0; k < b.Length; k++)
                 {
-                    data[position++] = b[k];
+                    query[position++] = b[k];
                 }
             }
-            data[position++] = 0; data[position++] = 0;
-            data[position++] = 15; data[position++] = 0;
-            data[position++] = 1;
+            query[position++] = 0; query[position++] = 0;
+            query[position++] = 15; query[position++] = 0;
+            query[position++] = 1;
+
+            return query;
         }
+
         //for un packing the byte array 
-        public ArrayList makeResponse()
+        private List<MXRecord> makeResponse(byte[] response)
         {
-            ArrayList mxRecords = new ArrayList();
-            MXRecord mxRecord;
+            data = response;
+            length = response.Length;
+
             //NOTE: we are ignoring the unnecessary fields. 
             // and takes only the data required to build MX records. 
             int qCount = ((data[4] & 0xFF) << 8) | (data[5] & 0xFF);
@@ -134,6 +114,7 @@ namespace DnsLib
                 position = proc(position);
                 position += 4;
             }
+            List<MXRecord> mxRecords = new List<MXRecord>();
             for (int i = 0; i < aCount; ++i)
             {
                 name = "";
@@ -142,13 +123,15 @@ namespace DnsLib
                 int pref = (data[position++] << 8) | (data[position++] & 0xFF);
                 name = "";
                 position = proc(position);
-                mxRecord = new MXRecord();
-                mxRecord.preference = pref;
-                mxRecord.exchange = name;
-                mxRecords.Add(mxRecord);
+                mxRecords.Add(new MXRecord
+                {
+                    preference = pref,
+                    exchange = name
+                });
             }
             return mxRecords;
         }
+
         private int proc(int position)
         {
             int len = (data[position++] & 0xFF);
