@@ -431,7 +431,7 @@ namespace Duplicati.Library.Main
         public static System.Security.Cryptography.CryptoStream GetFileHasherStream
             (System.IO.Stream stream, System.Security.Cryptography.CryptoStreamMode mode, out Func<string> getHash)
         {
-            var hasher = SHA256Managed.Create();
+            var hasher = SHA256.Create();
             System.Security.Cryptography.CryptoStream retHasherStream =
                 new System.Security.Cryptography.CryptoStream(stream, hasher, mode);
             getHash = () =>
