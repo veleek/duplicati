@@ -135,9 +135,9 @@ namespace Duplicati.Server.WebServer
                 try
                 {
                     if (string.IsNullOrWhiteSpace(certificateFilePassword))
-                        cert = new X509Certificate2(certificateFile, "", X509KeyStorageFlags.Exportable);
+                        cert = new X509Certificate2(certificateFile, "");
                     else
-                        cert = new X509Certificate2(certificateFile, certificateFilePassword, X509KeyStorageFlags.Exportable);
+                        cert = new X509Certificate2(certificateFile, certificateFilePassword);
 
                     certValid = cert.HasPrivateKey;
                 }

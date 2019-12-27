@@ -30,7 +30,7 @@ namespace Duplicati.Library.Utility
     public class MD5CalculatingStream : HashCalculatingStream
     {
         public MD5CalculatingStream(System.IO.Stream basestream)
-            : base(basestream, "MD5")
+            : base(basestream, MD5.Create())
         {
         }
     }
@@ -48,11 +48,6 @@ namespace Duplicati.Library.Utility
 
         private byte[] m_hashbuffer = null;
         private int m_hashbufferLength = 0;
-
-        public HashCalculatingStream(System.IO.Stream basestream, string hashalgorithm)
-            : this(basestream, HashAlgorithm.Create(hashalgorithm))
-        {
-        }
 
         public HashCalculatingStream(System.IO.Stream basestream, System.Security.Cryptography.HashAlgorithm algorithm)
             : base(basestream)

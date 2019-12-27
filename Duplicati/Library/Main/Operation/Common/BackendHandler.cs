@@ -130,7 +130,7 @@ namespace Duplicati.Library.Main.Operation.Common
             public static string CalculateFileHash(string filename)
             {
                 using (System.IO.FileStream fs = System.IO.File.OpenRead(filename))
-                using (var hasher = HashAlgorithm.Create(VOLUME_HASH))
+                using (var hasher = SHA256.Create())
                     return Convert.ToBase64String(hasher.ComputeHash(fs));
             }
 

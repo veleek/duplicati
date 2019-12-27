@@ -340,7 +340,7 @@ namespace Duplicati.Library.Main.Database
 
         public void FixMissingBlocklistHashes(string blockhashalgorithm, long blocksize)
         {
-            var blockhasher = HashAlgorithm.Create(blockhashalgorithm);
+            var blockhasher = (HashAlgorithm)CryptoConfig.CreateFromName(blockhashalgorithm);
             var hashsize = blockhasher.HashSize / 8;
             var blocklistbuffer = new byte[blocksize];
             int blocklistoffset = 0;

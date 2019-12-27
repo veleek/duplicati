@@ -180,7 +180,7 @@ namespace Duplicati.Library.Main
             {
                 try
                 {
-                    var p = System.Security.Cryptography.HashAlgorithm.Create(h);
+                    var p = (HashAlgorithm)CryptoConfig.CreateFromName(h);
                     if (p != null)
                         r.Add(h);
                 }
@@ -1363,7 +1363,7 @@ namespace Duplicati.Library.Main
             get
             {
 				if (m_cachedBlockHashSize.Key != BlockHashAlgorithm)
-					m_cachedBlockHashSize = new KeyValuePair<string, int>(BlockHashAlgorithm, HashAlgorithm.Create(BlockHashAlgorithm).HashSize / 8);
+					m_cachedBlockHashSize = new KeyValuePair<string, int>(BlockHashAlgorithm, (HashAlgorithm)CryptoConfig.CreateFromName(BlockHashAlgorithm).HashSize / 8);
 				
 				return m_cachedBlockHashSize.Value;
             }

@@ -208,7 +208,7 @@ namespace Duplicati.CommandLine.RecoveryTool
                                             textJSON = sourceStreamReader.ReadToEnd();
                                             JToken token = JObject.Parse(textJSON);
                                             var fileInfoBlocks = new FileInfo(Path.Combine(targetfolder, cmfileNew.Replace("vol/", "")));
-                                            var filehasher = HashAlgorithm.Create(m_Options.FileHashAlgorithm);
+                                            var filehasher = (HashAlgorithm)CryptoConfig.CreateFromName(m_Options.FileHashAlgorithm);
 
                                             using (var fileStream = fileInfoBlocks.Open(FileMode.Open))
                                             {

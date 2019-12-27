@@ -51,7 +51,7 @@ namespace Duplicati.Library.Main
                     
                 using (var ms = new System.IO.MemoryStream())
                 using (var w = new StreamWriter(ms, Encoding.UTF8))
-                using(var filehasher = HashAlgorithm.Create(options.FileHashAlgorithm))
+                using(var filehasher = (HashAlgorithm)CryptoConfig.CreateFromName(options.FileHashAlgorithm))
                 {
                     if (filehasher == null)
                         throw new Duplicati.Library.Interface.UserInformationException(Strings.Common.InvalidHashAlgorithm(options.FileHashAlgorithm), "FileHashAlgorithmNotSupported");

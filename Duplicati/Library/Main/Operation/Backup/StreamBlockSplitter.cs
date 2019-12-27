@@ -48,8 +48,8 @@ namespace Duplicati.Library.Main.Operation.Backup
             async self =>
             {
                 var blocksize = options.Blocksize;
-                var filehasher = HashAlgorithm.Create(options.FileHashAlgorithm);
-                var blockhasher = HashAlgorithm.Create(options.BlockHashAlgorithm);
+                var filehasher = (HashAlgorithm)CryptoConfig.CreateFromName(options.FileHashAlgorithm);
+                var blockhasher = (HashAlgorithm)CryptoConfig.CreateFromName(options.BlockHashAlgorithm);
                 var emptymetadata = Utility.WrapMetadata(new Dictionary<string, string>(), options);
                 var maxmetadatasize = (options.Blocksize / (long)options.BlockhashSize) * options.Blocksize;
 

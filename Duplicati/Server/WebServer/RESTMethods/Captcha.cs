@@ -17,6 +17,7 @@
 using System;
 using System.Linq;
 using System.Collections.Generic;
+using System.Security.Cryptography;
 
 namespace Duplicati.Server.WebServer.RESTMethods
 {
@@ -111,15 +112,10 @@ namespace Duplicati.Server.WebServer.RESTMethods
 
                 var answer = CaptchaUtil.CreateRandomAnswer(minlength: 6, maxlength: 6);
                 var nonce = Guid.NewGuid().ToString();
-
-                string token;
-                using (var ms = new System.IO.MemoryStream())
-                {
-                    var bytes = System.Text.Encoding.UTF8.GetBytes(answer + nonce);
-                    ms.Write(bytes, 0, bytes.Length);
-                    ms.Position = 0;
-                    token = Library.Utility.Utility.Base64PlainToBase64Url(Library.Utility.Utility.CalculateHash(ms));
-                }
+                var bytes = System.Text.Encoding.UTF8.GetBytes(answer + nonce);
+                string token = Library.Utility.Utility.Base64PlainToBase64Url(
+                    Convert.ToBase64String(SHA256.Create().ComputeHash(bytes))
+                );
 
                 lock (m_lock)
                 {
