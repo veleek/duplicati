@@ -82,7 +82,7 @@ namespace Duplicati.Server.WebServer
                     this.Write('(');
                 }
 
-                Serializer.SerializeJson(this, o, true);
+                Serializer.SerializeJson(this, o);
 
                 if (!string.IsNullOrEmpty(m_jsonp))
                 {

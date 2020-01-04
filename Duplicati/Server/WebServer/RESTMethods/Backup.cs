@@ -173,7 +173,7 @@ namespace Duplicati.Server.WebServer.RESTMethods
             {
                 using (StreamWriter sw = new System.IO.StreamWriter(ms))
                 {
-                    Serializer.SerializeJson(sw, ipx, true);
+                    Serializer.SerializeJson(sw, ipx);
 
                     if (!string.IsNullOrWhiteSpace(passphrase))
                     {

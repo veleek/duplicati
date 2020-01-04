@@ -1,7 +1,6 @@
-﻿using System;
-using System.Collections.Generic;
+﻿using System.Globalization;
+using System.IO;
 using System.Linq;
-using System.Text;
 using Newtonsoft.Json;
 using Newtonsoft.Json.Converters;
 
@@ -9,44 +8,40 @@ namespace Duplicati.Server.Serialization
 {    
     public class Serializer
     {
-        protected static readonly JsonSerializerSettings m_jsonSettings;
-        protected static readonly Formatting m_jsonFormatting = Formatting.Indented;
+        protected static readonly JsonSerializer m_jsonSerializer = JsonSerializer.Create(
+            new JsonSerializerSettings
+            {
+                Formatting = Formatting.Indented,
+                ReferenceLoopHandling = ReferenceLoopHandling.Ignore,
+                Culture = CultureInfo.InvariantCulture,
+                Converters = new JsonConverter[] {
+                    new DayOfWeekConcerter(),
+                    new StringEnumConverter(),
+                    new SerializableStatusCreator(),
+                    new SettingsCreator(),
+                    new FilterCreator(),
+                    new NotificationCreator(),
+                }.ToList()
+            }
+        );
 
-        static Serializer()
+        public static void SerializeJson(TextWriter textWriter, object o)
         {
-            m_jsonSettings = new JsonSerializerSettings();
-            m_jsonSettings.ReferenceLoopHandling = ReferenceLoopHandling.Ignore;
-            m_jsonSettings.Converters = new JsonConverter[] {
-                new DayOfWeekConcerter(),
-                new StringEnumConverter(),
-                new SerializableStatusCreator(),
-                new SettingsCreator(),
-                new FilterCreator(),
-                new NotificationCreator(),
-            }.ToList();
+            var jsonWriter = new JsonTextWriter(textWriter);
+            m_jsonSerializer.Serialize(jsonWriter, o);
+            jsonWriter.Flush();
         }
 
-        public static void SerializeJson(System.IO.TextWriter sw, object o, bool preventDispose = false)
+        public static T Deserialize<T>(TextReader textReader)
         {
-            Newtonsoft.Json.JsonSerializer jsonSerializer = Newtonsoft.Json.JsonSerializer.Create(m_jsonSettings);
-            var jsonWriter = new JsonTextWriter(sw);
-            using (preventDispose ? null : jsonWriter)
-            {
-                jsonWriter.Formatting = m_jsonFormatting;
-                jsonSerializer.Serialize(jsonWriter, o);
-                jsonWriter.Flush();
-                sw.Flush();
-            }
+            using var jsonReader = new JsonTextReader(textReader);
+            return m_jsonSerializer.Deserialize<T>(jsonReader);
         }
 
-        public static T Deserialize<T>(System.IO.TextReader sr)
+        public static T Deserialize<T>(Stream jsonStream)
         {
-            Newtonsoft.Json.JsonSerializer jsonSerializer = Newtonsoft.Json.JsonSerializer.Create(m_jsonSettings);
-            using (var jsonReader = new JsonTextReader(sr))
-            {
-                jsonReader.Culture = System.Globalization.CultureInfo.InvariantCulture;
-                return jsonSerializer.Deserialize<T>(jsonReader);
-            }
+            using StreamReader streamReader = new StreamReader(jsonStream);
+            return Deserialize<T>(streamReader);
         }
     }
 }

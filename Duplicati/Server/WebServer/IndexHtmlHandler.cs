@@ -69,9 +69,10 @@ namespace Duplicati.Server.WebServer
         {
             if (ForbiddenChars.Any(x => uri.AbsolutePath.Contains(x)))
                 throw new BadRequestException("Illegal path");
-            var uripath = Uri.UnescapeDataString(uri.AbsolutePath);
-            while(uripath.Length > 0 && (uripath.StartsWith("/", StringComparison.Ordinal) || uripath.StartsWith(DirSep, StringComparison.Ordinal)))
-                uripath = uripath.Substring(1);
+            string uripath = Uri.UnescapeDataString(uri.AbsolutePath);
+            uripath = System.IO.Path.GetDirectoryName(uripath);
+            uripath = uripath.TrimStart('/', Util.DirectorySeparatorChar);
+            
             return System.IO.Path.Combine(m_webroot, uripath.Replace('/', System.IO.Path.DirectorySeparatorChar));
         }
     }

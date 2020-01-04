@@ -56,7 +56,7 @@ namespace Duplicati.Library.SQLiteHelper
     public static class DatabaseUpgrader
     {
         //This is the "folder" where the embedded resources can be found
-        private const string FOLDER_NAME = "Duplicati.Library.Main.Database.Database_schema";
+        private const string FOLDER_NAME = "Database.Database_schema";
         
         //This is the name of the schema sql
         private const string SCHEMA_NAME = "Schema.sql";
@@ -138,16 +138,15 @@ namespace Duplicati.Library.SQLiteHelper
         public static void UpgradeDatabase(IDbConnection connection, string sourcefile, Type eltype)
         {
             var asm = eltype.Assembly;
-
+            string prefix = $"{asm.GetName().Name}.{FOLDER_NAME}.";
             string schema;
-            using (var rd = new System.IO.StreamReader(asm.GetManifestResourceStream($"{FOLDER_NAME}.{SCHEMA_NAME}")))
+            using (var rd = new System.IO.StreamReader(asm.GetManifestResourceStream($"{prefix}{SCHEMA_NAME}")))
                 schema = rd.ReadToEnd();
 
             //Get updates, and sort them according to version
             //This enables upgrading through several versions
             //ea, from 1 to 8, by stepping 2->3->4->5->6->7->8
             SortedDictionary<int, string> upgrades = new SortedDictionary<int, string>();
-            string prefix = FOLDER_NAME + ".";
             foreach (string s in asm.GetManifestResourceNames())
             {
                 //The resource name will be "Duplicati.Library.Main.Database.Database_schema.1.Sample upgrade.sql"

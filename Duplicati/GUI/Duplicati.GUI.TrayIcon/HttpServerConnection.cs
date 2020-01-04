@@ -1,8 +1,15 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.Diagnostics;
+using System.IO;
 using System.Linq;
 using System.Net;
+using System.Net.Http;
+using System.Net.Http.Headers;
+using System.Security.Cryptography;
 using System.Text;
+using System.Threading;
+using System.Threading.Tasks;
 using Duplicati.Library.Common.IO;
 using Duplicati.Server.Serialization;
 using Duplicati.Server.Serialization.Interface;
@@ -11,7 +18,8 @@ namespace Duplicati.GUI.TrayIcon
 {
     public class HttpServerConnection : IDisposable
     {
-		private static readonly string LOGTAG = Library.Logging.Log.LogTagFromType<HttpServerConnection>();
+        private static readonly Encoding ENCODING = Encoding.UTF8;
+        private static readonly string LOGTAG = Library.Logging.Log.LogTagFromType<HttpServerConnection>();
         private const string LOGIN_SCRIPT = "login.cgi";
         private const string STATUS_WINDOW = "index.html";
 
@@ -20,14 +28,14 @@ namespace Duplicati.GUI.TrayIcon
         private const string AUTH_COOKIE = "session-auth";
 
         private const string TRAYICONPASSWORDSOURCE_HEADER = "X-TrayIcon-PasswordSource";
-
+        
         private class BackgroundRequest
         {
-            public readonly string Method;
+            public readonly HttpMethod Method;
             public readonly string Endpoint;
             public readonly Dictionary<string, string> Query;
 
-            public BackgroundRequest(string method, string endpoint, Dictionary<string, string> query)
+            public BackgroundRequest(HttpMethod method, string endpoint, Dictionary<string, string> query)
             {
                 this.Method = method;
                 this.Endpoint = endpoint;
@@ -35,13 +43,11 @@ namespace Duplicati.GUI.TrayIcon
             }
         }
 
-        private readonly string m_apiUri;
         private readonly string m_baseUri;
         private string m_password;
         private readonly bool m_saltedpassword;
         private string m_authtoken;
         private string m_xsrftoken;
-        private static readonly System.Text.Encoding ENCODING = System.Text.Encoding.GetEncoding("utf-8");
 
         public delegate void StatusUpdateDelegate(IServerStatus status);
         public event StatusUpdateDelegate OnStatusUpdated;
@@ -57,25 +63,41 @@ namespace Duplicati.GUI.TrayIcon
         private volatile IServerStatus m_status;
 
         private volatile bool m_shutdown = false;
-        private volatile System.Threading.Thread m_requestThread;
-        private volatile System.Threading.Thread m_pollThread;
-        private readonly System.Threading.AutoResetEvent m_waitLock;
+        private volatile Thread m_requestThread;
+        private volatile Thread m_pollThread;
+        private readonly AutoResetEvent m_waitLock;
 
         private readonly Dictionary<string, string> m_updateRequest;
         private readonly Dictionary<string, string> m_options;
         private readonly Program.PasswordSource m_passwordSource;
-        private string m_TrayIconHeaderValue => (m_passwordSource == Program.PasswordSource.Database) ? "database" : "user";
 
         public IServerStatus Status { get { return m_status; } }
 
         private readonly object m_lock = new object();
         private readonly Queue<BackgroundRequest> m_workQueue = new Queue<BackgroundRequest>();
 
+        private readonly CookieContainer m_cookies;
+        private readonly HttpClient m_client;
+
         public HttpServerConnection(Uri server, string password, bool saltedpassword, Program.PasswordSource passwordSource, bool disableTrayIconLogin, Dictionary<string, string> options)
         {
             m_baseUri = Util.AppendDirSeparator(server.ToString(), "/");
 
-            m_apiUri = m_baseUri + "api/v1";
+            string trayIconHeaderValue = (m_passwordSource == Program.PasswordSource.Database) ? "database" : "user";
+            string versionString = System.Reflection.Assembly.GetExecutingAssembly().GetName().Version.ToString();
+
+            m_cookies = new CookieContainer();
+            var handler = new HttpClientHandler { CookieContainer = m_cookies };
+            m_client = new HttpClient(handler)
+            {
+                BaseAddress = new Uri(m_baseUri + "api/v1/"),
+                DefaultRequestHeaders =
+                {
+                    { TRAYICONPASSWORDSOURCE_HEADER, trayIconHeaderValue }
+                }
+            };
+
+            m_client.DefaultRequestHeaders.UserAgent.Add(new ProductInfoHeaderValue("DuplicatiTrayIcon", versionString));
 
             m_disableTrayIconLogin = disableTrayIconLogin;
 
@@ -97,9 +119,9 @@ namespace Duplicati.GUI.TrayIcon
             m_updateRequest["longpoll"] = "true";
             m_updateRequest["duration"] = "5m";
             
-            m_waitLock = new System.Threading.AutoResetEvent(false);
-            m_requestThread = new System.Threading.Thread(ThreadRunner);
-            m_pollThread = new System.Threading.Thread(LongPollRunner);
+            m_waitLock = new AutoResetEvent(false);
+            m_requestThread = new Thread(ThreadRunner);
+            m_pollThread = new Thread(LongPollRunner);
 
             m_requestThread.Name = "TrayIcon Request Thread";
             m_pollThread.Name = "TrayIcon Longpoll Thread";
@@ -110,11 +132,10 @@ namespace Duplicati.GUI.TrayIcon
 
         private void UpdateStatus()
         {
-            m_status = PerformRequest<IServerStatus>("GET", "/serverstate", m_updateRequest);
+            m_status = PerformRequest<IServerStatus>(HttpMethod.Get, "serverstate", m_updateRequest).Result;
             m_updateRequest["lasteventid"] = m_status.LastEventID.ToString();
 
-            if (OnStatusUpdated != null)
-                OnStatusUpdated(m_status);
+            OnStatusUpdated?.Invoke(m_status);
 
             if (m_lastNotificationId != m_status.LastNotificationUpdateID)
             {
@@ -131,8 +152,7 @@ namespace Duplicati.GUI.TrayIcon
 
         private void UpdateNotifications()
         {
-            var req = new Dictionary<string, string>();
-            var notifications = PerformRequest<INotification[]>("GET", "/notifications", req);
+            var notifications = PerformRequest<INotification[]>(HttpMethod.Get, "notifications").Result;
             if (notifications != null)
             {
                 foreach(var n in notifications.Where(x => x.Timestamp > m_firstNotificationTime))
@@ -146,10 +166,9 @@ namespace Duplicati.GUI.TrayIcon
 
         private void UpdateApplicationSettings()
         {
-            var req = new Dictionary<string, string>();
-            var settings = PerformRequest<Dictionary<string, string>>("GET", "/serversettings", req);
-            if (settings != null && settings.TryGetValue("disable-tray-icon-login", out var str))
-                m_disableTrayIconLogin = Library.Utility.Utility.ParseBool(str, false);
+            var settings = PerformRequest<Dictionary<string, string>>(HttpMethod.Get, "serversettings").Result;
+            if (settings != null && settings.TryGetValue("disable-tray-icon-login", out string disableTrayIconLogoValue))
+                m_disableTrayIconLogin = Library.Utility.Utility.ParseBool(disableTrayIconLogoValue, false);
         }
 
         private void LongPollRunner()
@@ -190,7 +209,7 @@ namespace Duplicati.GUI.TrayIcon
                         if (req != null)
                         {
                             any = true;
-                            PerformRequest<string>(req.Method, req.Endpoint, req.Query);
+                            PerformRequest<string>(req.Method, req.Endpoint, req.Query).Wait();
                         }
                     
                     } while (req != null);
@@ -235,78 +254,69 @@ namespace Duplicati.GUI.TrayIcon
             public string Nonce = null;
         }
 
-        private SaltAndNonce GetSaltAndNonce()
+        private async Task<SaltAndNonce> GetSaltAndNonce()
         {
-            var httpOptions = new Duplicati.Library.Modules.Builtin.HttpOptions();
-            httpOptions.Configure(m_options);
-
-            using (httpOptions)
+            using (var httpOptions = new Library.Modules.Builtin.HttpOptions())
             {
-                var req = (System.Net.HttpWebRequest) System.Net.WebRequest.Create(m_baseUri + LOGIN_SCRIPT);
-                req.Method = "POST";
-                req.UserAgent = "Duplicati TrayIcon Monitor, v" +
-                                System.Reflection.Assembly.GetExecutingAssembly().GetName().Version;
-                req.Headers.Add(TRAYICONPASSWORDSOURCE_HEADER, m_TrayIconHeaderValue);
-                req.ContentType = "application/x-www-form-urlencoded";
+                httpOptions.Configure(m_options);
 
-                Duplicati.Library.Utility.AsyncHttpRequest areq = new Library.Utility.AsyncHttpRequest(req);
-                var body = System.Text.Encoding.ASCII.GetBytes("get-nonce=1");
-                using (var f = areq.GetRequestStream(body.Length))
-                    f.Write(body, 0, body.Length);
+                HttpRequestMessage request = new HttpRequestMessage(HttpMethod.Post, LOGIN_SCRIPT)
+                {
+                    Content = new FormUrlEncodedContent(
+                    new Dictionary<string, string>
+                    {
+                        ["get-nonce"] = "1"
+                    })
+                };
 
-                using (var r = (System.Net.HttpWebResponse) areq.GetResponse())
-                using (var s = areq.GetResponseStream())
-                using (var sr = new System.IO.StreamReader(s, ENCODING, true))
-                    return Serializer.Deserialize<SaltAndNonce>(sr);
+                HttpResponseMessage response = await m_client.SendAsync(request);
+                Stream responseStream = await response.Content.ReadAsStreamAsync();
+                return Serializer.Deserialize<SaltAndNonce>(responseStream);
             }
         }
 
-        private string PerformLogin(string password, string nonce)
+        private async Task<string> PerformLogin(string password, string nonce)
         {
-            var httpOptions = new Duplicati.Library.Modules.Builtin.HttpOptions();
-            httpOptions.Configure(m_options);
-
-            using (httpOptions)
+            using (var httpOptions = new Library.Modules.Builtin.HttpOptions())
             {
-                System.Net.HttpWebRequest req =
-                    (System.Net.HttpWebRequest) System.Net.WebRequest.Create(m_baseUri + LOGIN_SCRIPT);
-                req.Method = "POST";
-                req.UserAgent = "Duplicati TrayIcon Monitor, v" +
-                                System.Reflection.Assembly.GetExecutingAssembly().GetName().Version;
-                req.Headers.Add(TRAYICONPASSWORDSOURCE_HEADER, m_TrayIconHeaderValue);
-                req.ContentType = "application/x-www-form-urlencoded";
-                if (req.CookieContainer == null)
-                    req.CookieContainer = new System.Net.CookieContainer();
-                req.CookieContainer.Add(new System.Net.Cookie("session-nonce", nonce, "/", req.RequestUri.Host));
+                httpOptions.Configure(m_options);
 
-                //Wrap it all in async stuff
-                Duplicati.Library.Utility.AsyncHttpRequest areq = new Library.Utility.AsyncHttpRequest(req);
-                var body = System.Text.Encoding.ASCII.GetBytes("password=" +
-                                                               Duplicati.Library.Utility.Uri.UrlEncode(password));
-                using (var f = areq.GetRequestStream(body.Length))
-                    f.Write(body, 0, body.Length);
+                m_cookies.Add(new Cookie("session-nonce", nonce, "/", m_client.BaseAddress.Host));
 
-                using (var r = (System.Net.HttpWebResponse) areq.GetResponse())
-                    if (r.StatusCode == System.Net.HttpStatusCode.OK)
-                        return (r.Cookies[AUTH_COOKIE] ?? r.Cookies[Library.Utility.Uri.UrlEncode(AUTH_COOKIE)]).Value;
+                HttpRequestMessage request = new HttpRequestMessage(HttpMethod.Post, LOGIN_SCRIPT)
+                {
+                    Content = new FormUrlEncodedContent(
+                        new Dictionary<string, string>
+                        {
+                            ["password"] = Library.Utility.Uri.UrlEncode(password)
+                        }),
+                };
 
-                return null;
+                HttpResponseMessage response = await m_client.SendAsync(request);
+                if(response.StatusCode != HttpStatusCode.OK)
+                {
+                    return null;
+                }
+
+                return response.Headers.GetValues("Cookie").FirstOrDefault(c => c.StartsWith(AUTH_COOKIE));
+                //return (r.Cookies[AUTH_COOKIE] ?? r.Cookies[Library.Utility.Uri.UrlEncode(AUTH_COOKIE)]).Value;
             }
         }
 
-        private string GetAuthToken()
+        private async Task<string> GetAuthToken()
         {
-            var salt_nonce = GetSaltAndNonce();
-            var sha256 = System.Security.Cryptography.SHA256.Create();
-            var password = m_password;
-
             if (string.IsNullOrWhiteSpace(m_password))
-                return "";
+                return string.Empty;
+            
+            SHA256 sha256 = SHA256.Create();
+
+            var salt_nonce = await GetSaltAndNonce();
+            var password = m_password;
 
             if (!m_saltedpassword)
             {
-                var str = System.Text.Encoding.UTF8.GetBytes(m_password);
-                var buf = Convert.FromBase64String(salt_nonce.Salt);
+                byte[] str = ENCODING.GetBytes(m_password);
+                byte[] buf = Convert.FromBase64String(salt_nonce.Salt);
                 sha256.TransformBlock(str, 0, str.Length, str, 0);
                 sha256.TransformFinalBlock(buf, 0, buf.Length);
                 password = Convert.ToBase64String(sha256.Hash);
@@ -319,208 +329,149 @@ namespace Duplicati.GUI.TrayIcon
             sha256.TransformFinalBlock(pwdbuf, 0, pwdbuf.Length);
             var pwd = Convert.ToBase64String(sha256.Hash);
 
-            return PerformLogin(pwd, salt_nonce.Nonce);
+            return await PerformLogin(pwd, salt_nonce.Nonce);
         }
 
-        private string GetXSRFToken()
+        private async Task<T> PerformRequest<T>(HttpMethod method, string endpoint, Dictionary<string, string> queryparams = null)
         {
-            var httpOptions = new Duplicati.Library.Modules.Builtin.HttpOptions();
-            httpOptions.Configure(m_options);
+            Debug.Assert(!endpoint.StartsWith("/"), $"Absolute endpoint '{endpoint}' provided should be relative.");
 
-            using (httpOptions)
+            bool hasTriedPassword = false;
+            if (queryparams == null)
             {
-                System.Net.HttpWebRequest req =
-                    (System.Net.HttpWebRequest) System.Net.WebRequest.Create(m_baseUri + STATUS_WINDOW);
-                req.Method = "GET";
-                req.UserAgent = "Duplicati TrayIcon Monitor, v" +
-                                System.Reflection.Assembly.GetExecutingAssembly().GetName().Version;
-                req.Headers.Add(TRAYICONPASSWORDSOURCE_HEADER, m_TrayIconHeaderValue);
-                if (req.CookieContainer == null)
-                    req.CookieContainer = new System.Net.CookieContainer();
-
-                //Wrap it all in async stuff
-                Duplicati.Library.Utility.AsyncHttpRequest areq = new Library.Utility.AsyncHttpRequest(req);
-                using (var r = (System.Net.HttpWebResponse) areq.GetResponse())
-                    if (r.StatusCode == System.Net.HttpStatusCode.OK)
-                        return (r.Cookies[XSRF_COOKIE] ?? r.Cookies[Library.Utility.Uri.UrlEncode(XSRF_COOKIE)]).Value;
-
-                return null;
+                queryparams = new Dictionary<string, string>();
             }
-        }
 
-        private T PerformRequest<T>(string method, string urlfragment, Dictionary<string, string> queryparams)
-        {
-            var hasTriedXSRF = false;
-            var hasTriedPassword = false;
+            queryparams["format"] = "json";
+
+            using var httpOptions = new Library.Modules.Builtin.HttpOptions();
+            httpOptions.Configure(m_options);
 
             while (true)
             {
-                try
-                {
-                    return PerformRequestInternal<T>(method, urlfragment, queryparams);
-                }
-                catch (System.Net.WebException wex)
-                {
-                    var httpex = wex.Response as HttpWebResponse;
-                    if (httpex == null)
-                        throw;
+                HttpRequestMessage request = new HttpRequestMessage(
+                    method,
+                    new Uri(endpoint + "?" + EncodeQueryString(queryparams), UriKind.Relative));
 
-                    if (
-                        !hasTriedXSRF &&
-                        wex.Status == System.Net.WebExceptionStatus.ProtocolError &&
-                        httpex.StatusCode == System.Net.HttpStatusCode.BadRequest &&
-                        httpex.StatusDescription.IndexOf("XSRF", StringComparison.OrdinalIgnoreCase) >= 0)
-                    {
-                        hasTriedXSRF = true;
-                        var t = httpex.Cookies[XSRF_COOKIE]?.Value;
+                request.Headers.AcceptCharset.Add(new StringWithQualityHeaderValue(ENCODING.BodyName));
 
-                        if (string.IsNullOrWhiteSpace(t))
-                            t = GetXSRFToken();
-
-                        m_xsrftoken = Duplicati.Library.Utility.Uri.UrlDecode(t);
-                    }
-                    else if (
-                        !hasTriedPassword &&
-                        wex.Status == System.Net.WebExceptionStatus.ProtocolError &&
-                        httpex.StatusCode == System.Net.HttpStatusCode.Unauthorized)
-                    {
-                        //Can survive if server password is changed via web ui
-                        switch (m_passwordSource)
-                        {
-                            case Program.PasswordSource.Database:
-                                if (Program.databaseConnection != null)
-                                    Program.databaseConnection.ApplicationSettings.ReloadSettings();
-                                
-                                if (Program.databaseConnection != null && Program.databaseConnection.ApplicationSettings.WebserverPasswordTrayIcon != m_password)
-                                    m_password = Program.databaseConnection.ApplicationSettings.WebserverPasswordTrayIcon;
-                                else
-                                    hasTriedPassword = true;
-                                break;
-                            case Program.PasswordSource.HostedServer:
-                                if (Server.Program.DataConnection != null && Server.Program.DataConnection.ApplicationSettings.WebserverPassword != m_password)
-                                    m_password = Server.Program.DataConnection.ApplicationSettings.WebserverPassword;
-                                else
-                                    hasTriedPassword = true;
-                                break;
-                            default:
-                                throw new ArgumentOutOfRangeException();
-                        }
-
-                        m_authtoken = GetAuthToken();
-                    }
-                    else
-                        throw;
-                }
-            }
-        }
-
-        private T PerformRequestInternal<T>(string method, string endpoint, Dictionary<string, string> queryparams)
-        {
-            queryparams["format"] = "json";
-
-            string query = EncodeQueryString(queryparams);
-
-            // TODO: This can interfere with running backups, 
-            // as the System.Net.ServicePointManager is shared with
-            // all connections doing ftp/http requests
-            using (var httpOptions = new Duplicati.Library.Modules.Builtin.HttpOptions())
-            {
-                httpOptions.Configure(m_options);
-
-                var req =
-                    (System.Net.HttpWebRequest) System.Net.WebRequest.Create(
-                        new Uri(m_apiUri + endpoint + '?' + query));
-                req.Method = method;
-                req.Headers.Add("Accept-Charset", ENCODING.BodyName);
                 if (m_xsrftoken != null)
-                    req.Headers.Add(XSRF_HEADER, m_xsrftoken);
-                req.UserAgent = "Duplicati TrayIcon Monitor, v" +
-                                System.Reflection.Assembly.GetExecutingAssembly().GetName().Version;
-                req.Headers.Add(TRAYICONPASSWORDSOURCE_HEADER, m_TrayIconHeaderValue);
-                if (req.CookieContainer == null)
-                    req.CookieContainer = new System.Net.CookieContainer();
+                {
+                    request.Headers.Add(XSRF_HEADER, m_xsrftoken);
+                    m_cookies.Add(new Cookie(XSRF_COOKIE, m_xsrftoken, "/", m_client.BaseAddress.Host));
+                }
 
                 if (m_authtoken != null)
-                    req.CookieContainer.Add(new System.Net.Cookie(AUTH_COOKIE, m_authtoken, "/", req.RequestUri.Host));
-                if (m_xsrftoken != null)
-                    req.CookieContainer.Add(new System.Net.Cookie(XSRF_COOKIE, m_xsrftoken, "/", req.RequestUri.Host));
+                    m_cookies.Add(new Cookie(AUTH_COOKIE, m_authtoken, "/", m_client.BaseAddress.Host));
 
-                //Wrap it all in async stuff
-                var areq = new Library.Utility.AsyncHttpRequest(req);
-                req.AllowWriteStreamBuffering = true;
+                CancellationTokenSource cts = new CancellationTokenSource();
 
-                //Assign the timeout, and add a little processing time as well
-                if (endpoint.Equals("/serverstate", StringComparison.OrdinalIgnoreCase) &&
+                if (endpoint.Equals("serverstate", StringComparison.OrdinalIgnoreCase) &&
                     queryparams.ContainsKey("duration"))
-                    areq.Timeout = (int) (Duplicati.Library.Utility.Timeparser.ParseTimeSpan(queryparams["duration"]) +
-                                          TimeSpan.FromSeconds(5)).TotalMilliseconds;
+                {
+                    //Assign the timeout, and add a little processing time as well
+                    var timeout = Library.Utility.Timeparser.ParseTimeSpan(queryparams["duration"]) +
+                        TimeSpan.FromSeconds(5);
+                    cts.CancelAfter(timeout);
+                }
 
-                using (var r = (System.Net.HttpWebResponse) areq.GetResponse())
-                using (var s = areq.GetResponseStream())
+                HttpResponseMessage response = await m_client.SendAsync(request, cts.Token);
+
+                if (response.StatusCode == HttpStatusCode.BadRequest && response.ReasonPhrase.StartsWith("Missing XSRF Token"))
+                {
+                    string xsrfCookie = m_cookies.GetCookies(m_client.BaseAddress)[XSRF_COOKIE]?.Value;
+                    m_xsrftoken = Library.Utility.Uri.UrlDecode(xsrfCookie);
+
+                    continue;
+                }
+                else if (response.StatusCode == HttpStatusCode.Unauthorized && !hasTriedPassword)
+                {
+                    //Can survive if server password is changed via web ui
+                    switch (m_passwordSource)
+                    {
+                        case Program.PasswordSource.Database:
+                            if (Program.databaseConnection != null)
+                                Program.databaseConnection.ApplicationSettings.ReloadSettings();
+
+                            if (Program.databaseConnection != null && Program.databaseConnection.ApplicationSettings.WebserverPasswordTrayIcon != m_password)
+                                m_password = Program.databaseConnection.ApplicationSettings.WebserverPasswordTrayIcon;
+                            else
+                                hasTriedPassword = true;
+                            break;
+                        case Program.PasswordSource.HostedServer:
+                            if (Server.Program.DataConnection != null && Server.Program.DataConnection.ApplicationSettings.WebserverPassword != m_password)
+                                m_password = Server.Program.DataConnection.ApplicationSettings.WebserverPassword;
+                            else
+                                hasTriedPassword = true;
+                            break;
+                        default:
+                            throw new ArgumentOutOfRangeException();
+                    }
+
+                    m_authtoken = await GetAuthToken();
+                }
+
+                using (var s = await response.Content.ReadAsStreamAsync())
+                {
                     if (typeof(T) == typeof(string))
                     {
-                        using (System.IO.MemoryStream ms = new System.IO.MemoryStream())
-                        {
-                            s.CopyTo(ms);
-                            return (T) (object) ENCODING.GetString(ms.ToArray());
-                        }
+                        using MemoryStream ms = new MemoryStream();
+                        s.CopyTo(ms);
+                        return (T)(object)ENCODING.GetString(ms.ToArray());
                     }
                     else
                     {
-                        using (var sr = new System.IO.StreamReader(s, ENCODING, true))
-                            return Serializer.Deserialize<T>(sr);
+                        using var sr = new StreamReader(s, ENCODING, true);
+                        return Serializer.Deserialize<T>(sr);
                     }
+                }
             }
         }
 
-        private void ExecuteAndNotify(string method, string urifragment, Dictionary<string, string> req)
+        private void ExecuteAndNotify(HttpMethod method, string urifragment, Dictionary<string, string> queryParameters = null)
         {
             lock (m_lock)
             {
-                m_workQueue.Enqueue(new BackgroundRequest(method, urifragment, req));
+                m_workQueue.Enqueue(new BackgroundRequest(method, urifragment, queryParameters));
                 m_waitLock.Set();
             }
         }
 
         public void Pause(string duration = null)
         {
-            var req = new Dictionary<string, string>();
+            var queryParameters = new Dictionary<string, string>();
             if (!string.IsNullOrWhiteSpace(duration))
-                req.Add("duration", duration);
+                queryParameters.Add("duration", duration);
 
-            ExecuteAndNotify("POST", "/serverstate/pause", req);
+            ExecuteAndNotify(HttpMethod.Post, "serverstate/pause", queryParameters);
         }
 
         public void Resume()
         {
-            var req = new Dictionary<string, string>();
-            ExecuteAndNotify("POST", "/serverstate/resume", req);
+            ExecuteAndNotify(HttpMethod.Post, "serverstate/resume");
         }
 
         public void StopTask(long id)
         {
-            var req = new Dictionary<string, string>();
-            ExecuteAndNotify("POST", string.Format("/task/{0}/stop", Library.Utility.Uri.UrlPathEncode(id.ToString())), req);
+            ExecuteAndNotify(HttpMethod.Post, string.Format("task/{0}/stop", Library.Utility.Uri.UrlPathEncode(id.ToString())));
         }
 
         public void AbortTask(long id)
         {
-            var req = new Dictionary<string, string>();
-            ExecuteAndNotify("POST", string.Format("/task/{0}/abort", Library.Utility.Uri.UrlPathEncode(id.ToString())), req);
+            ExecuteAndNotify(HttpMethod.Post, string.Format("task/{0}/abort", Library.Utility.Uri.UrlPathEncode(id.ToString())));
         }
 
         public void RunBackup(long id, bool forcefull = false)
         {
-            var req = new Dictionary<string, string>();
+            var queryParameters = new Dictionary<string, string>();
             if (forcefull)
-                req.Add("full", "true");
-            ExecuteAndNotify("POST", string.Format("/backup/{0}/start", Library.Utility.Uri.UrlPathEncode(id.ToString())), req);
+                queryParameters.Add("full", "true");
+            ExecuteAndNotify(HttpMethod.Post, string.Format("backup/{0}/start", Library.Utility.Uri.UrlPathEncode(id.ToString())), queryParameters);
         }
   
         public void DismissNotification(long id)
         {
-            var req = new Dictionary<string, string>();
-            ExecuteAndNotify("DELETE", string.Format("/notification/{0}", Library.Utility.Uri.UrlPathEncode(id.ToString())), req);
+            ExecuteAndNotify(HttpMethod.Delete, string.Format("notification/{0}", Library.Utility.Uri.UrlPathEncode(id.ToString())));
         }
 
         public void Dispose()

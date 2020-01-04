@@ -662,7 +662,7 @@ namespace Duplicati.Server
 
                     using (var fs = System.IO.File.OpenWrite(tempfile))
                     using (var sw = new System.IO.StreamWriter(fs, System.Text.Encoding.UTF8))
-                        Serializer.SerializeJson(sw, taskdata, true);
+                        Serializer.SerializeJson(sw, taskdata);
 
                     tempfile.Protected = true;
 

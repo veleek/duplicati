@@ -106,7 +106,7 @@ namespace Duplicati.Server.WebServer.RESTMethods
                     {
                         using (var sw = new StringWriter())
                         {
-                            Serializer.SerializeJson(sw, ipx, true);
+                            Serializer.SerializeJson(sw, ipx);
                             output_template = output_template.Replace("'JSO'", sw.ToString());
                         }
                         info.BodyWriter.Write(output_template.Replace("MSG", "Import completed, but a browser issue prevents loading the contents. Try using the direct import method instead."));
