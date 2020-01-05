@@ -21,11 +21,14 @@ using System.Linq;
 using HttpServer;
 using HttpServer.HttpModules;
 using System.Collections.Generic;
+using System.Security.Cryptography;
 
 namespace Duplicati.Server.WebServer
 {
     internal class AuthenticationHandler : HttpModule
     {
+        private const string AUTH_TOKEN_NAME = "auth-token";
+
         private const string AUTH_COOKIE_NAME = "session-auth";
         private const string NONCE_COOKIE_NAME = "session-nonce";
 
@@ -45,22 +48,25 @@ namespace Duplicati.Server.WebServer
         private readonly ConcurrentDictionary<string, Tuple<DateTime, string>> m_activeNonces = new ConcurrentDictionary<string, Tuple<DateTime, string>>();
         private readonly ConcurrentDictionary<string, DateTime> m_activexsrf = new ConcurrentDictionary<string, DateTime>();
 
-        readonly System.Security.Cryptography.RandomNumberGenerator m_prng = System.Security.Cryptography.RNGCryptoServiceProvider.Create();
+        private readonly RandomNumberGenerator m_prng = RandomNumberGenerator.Create();
 
         private string FindXSRFToken(HttpServer.IHttpRequest request)
         {
-            string xsrftoken = request.Headers[XSRF_HEADER_NAME] ?? "";
+            string xsrftoken = request.Headers[XSRF_HEADER_NAME];
 
             if (string.IsNullOrWhiteSpace(xsrftoken))
             {
-                var xsrfq = request.Form[XSRF_HEADER_NAME] ?? request.Form[Duplicati.Library.Utility.Uri.UrlEncode(XSRF_HEADER_NAME)];
-                xsrftoken = (xsrfq == null || string.IsNullOrWhiteSpace(xsrfq.Value)) ? "" : xsrfq.Value;
+                xsrftoken = GetFormValue(request, XSRF_HEADER_NAME);
             }
 
             if (string.IsNullOrWhiteSpace(xsrftoken))
             {
-                var xsrfq = request.QueryString[XSRF_HEADER_NAME] ?? request.QueryString[Duplicati.Library.Utility.Uri.UrlEncode(XSRF_HEADER_NAME)];
-                xsrftoken = (xsrfq == null || string.IsNullOrWhiteSpace(xsrfq.Value)) ? "" : xsrfq.Value;
+                xsrftoken = GetQueryStringValue(request, XSRF_HEADER_NAME);
+            }
+
+            if(string.IsNullOrWhiteSpace(xsrftoken))
+            {
+                xsrftoken = GetCookieValue(request, XSRF_COOKIE_NAME);
             }
 
             return xsrftoken;
@@ -89,15 +95,17 @@ namespace Duplicati.Server.WebServer
 
         private string FindAuthCookie(HttpServer.IHttpRequest request)
         {
-            var authcookie = request.Cookies[AUTH_COOKIE_NAME] ?? request.Cookies[Library.Utility.Uri.UrlEncode(AUTH_COOKIE_NAME)];
-            var authform = request.Form["auth-token"] ?? request.Form[Library.Utility.Uri.UrlEncode("auth-token")];
-            var authquery = request.QueryString["auth-token"] ?? request.QueryString[Library.Utility.Uri.UrlEncode("auth-token")];
+            string auth_token = GetCookieValue(request, AUTH_COOKIE_NAME);
 
-            var auth_token = string.IsNullOrWhiteSpace(authcookie?.Value) ? null : authcookie.Value;
-            if (!string.IsNullOrWhiteSpace(authquery?.Value))
-                auth_token = authquery.Value;
-            if (!string.IsNullOrWhiteSpace(authform?.Value))
-                auth_token = authform.Value;
+            if (string.IsNullOrWhiteSpace(auth_token))
+            {
+                auth_token = GetFormValue(request, AUTH_TOKEN_NAME);
+            }
+
+            if (string.IsNullOrWhiteSpace(auth_token))
+            {
+                auth_token = GetQueryStringValue(request, AUTH_TOKEN_NAME);
+            }
 
             return auth_token;
         }
@@ -125,6 +133,35 @@ namespace Duplicati.Server.WebServer
             }
 
             return false;
+        }
+
+        private string GetCookieValue(HttpServer.IHttpRequest request, string cookieName, string defaultValue = "")
+        {
+            var cookie = request.Cookies[cookieName] ?? request.Cookies[Library.Utility.Uri.UrlEncode(cookieName)];
+            var cookieValue = cookie?.Value?.Trim() ?? defaultValue;
+            if(!string.IsNullOrWhiteSpace(cookieValue))
+            {
+                cookieValue = Library.Utility.Uri.UrlDecode(cookieValue);
+            }
+
+            return cookieValue;
+        }
+
+        private string GetQueryStringValue(HttpServer.IHttpRequest request, string queryParameterName, string defaultValue = "")
+        {
+            return GetRequestInputValue(request.QueryString, queryParameterName, defaultValue);
+        }
+
+        private string GetFormValue(HttpServer.IHttpRequest request, string formParameterName, string defaultValue = "")
+        {
+            return GetRequestInputValue(request.Form, formParameterName, defaultValue);
+        }
+
+        private string GetRequestInputValue(HttpServer.HttpInput input, string inputName, string defaultValue = "")
+        {
+            var inputValue = input[inputName] ?? input[Library.Utility.Uri.UrlEncode(inputName)];
+            var inputValueString = inputValue?.Value?.Trim();
+            return inputValueString ?? defaultValue;
         }
 
         public override bool Process(HttpServer.IHttpRequest request, HttpServer.IHttpResponse response, HttpServer.Sessions.IHttpSession session)
@@ -208,64 +245,52 @@ namespace Duplicati.Server.WebServer
                     }
                     return true;
                 }
-                else
+                else if (input["password"] != null && !string.IsNullOrWhiteSpace(input["password"].Value))
                 {
-                    if (input["password"] != null && !string.IsNullOrWhiteSpace(input["password"].Value))
+                    var nonce_el = request.Cookies[NONCE_COOKIE_NAME] ?? request.Cookies[Library.Utility.Uri.UrlEncode(NONCE_COOKIE_NAME)];
+                    var nonce = Library.Utility.Uri.UrlDecode(nonce_el?.Value?.Trim() ?? string.Empty);
+
+                    if (!m_activeNonces.TryRemove(nonce, out var nonceData))
                     {
-                        var nonce_el = request.Cookies[NONCE_COOKIE_NAME] ?? request.Cookies[Library.Utility.Uri.UrlEncode(NONCE_COOKIE_NAME)];
-                        var nonce = nonce_el == null || string.IsNullOrWhiteSpace(nonce_el.Value) ? "" : nonce_el.Value;
-                        var urldecoded = nonce == null ? "" : Duplicati.Library.Utility.Uri.UrlDecode(nonce);
-                        if (m_activeNonces.ContainsKey(urldecoded))
-                            nonce = urldecoded;
-
-                        if (!m_activeNonces.ContainsKey(nonce))
-                        {
-                            response.Status = System.Net.HttpStatusCode.Unauthorized;
-                            response.Reason = "Unauthorized";
-                            response.ContentType = "application/json";
-                            return true;
-                        }
-
-                        var pwd = m_activeNonces[nonce].Item2;
-
-                        // Remove the nonce
-                        m_activeNonces.TryRemove(nonce, out _);
-
-                        if (pwd != input["password"].Value)
-                        {
-                            response.Status = System.Net.HttpStatusCode.Unauthorized;
-                            response.Reason = "Unauthorized";
-                            response.ContentType = "application/json";
-                            return true;
-                        }
-
-                        var buf = new byte[32];
-                        var expires = DateTime.UtcNow.AddHours(1);
-                        m_prng.GetBytes(buf);
-                        var token = Duplicati.Library.Utility.Utility.Base64UrlEncode(buf);
-                        while (token.Length > 0 && token.EndsWith("=", StringComparison.Ordinal))
-                            token = token.Substring(0, token.Length - 1);
-
-                        m_activeTokens.AddOrUpdate(token, key => expires, (key, existingValue) =>
-                        {
-                            // Simulate the original behavior => if the token, against all odds, is already used
-                            // we throw an ArgumentException
-                            throw new ArgumentException("An element with the same key already exists in the dictionary.");
-                        });
-
-                        response.Cookies.Add(new  HttpServer.ResponseCookie(AUTH_COOKIE_NAME, token, expires));
-
-                        using(var bw = new BodyWriter(response, request))
-                            bw.OutputOK();
-
+                        // Either the nonce is invalid or it was removed by another call.
+                        response.Status = System.Net.HttpStatusCode.Unauthorized;
+                        response.Reason = "Unauthorized";
+                        response.ContentType = "application/json";
                         return true;
                     }
+
+                    if (nonceData.Item2 != input["password"].Value)
+                    {
+                        response.Status = System.Net.HttpStatusCode.Unauthorized;
+                        response.Reason = "Unauthorized";
+                        response.ContentType = "application/json";
+                        return true;
+                    }
+
+                    var buf = new byte[32];
+                    var expires = DateTime.UtcNow.AddHours(1);
+                    m_prng.GetBytes(buf);
+                    var token = Duplicati.Library.Utility.Utility.Base64UrlEncode(buf);
+                    while (token.Length > 0 && token.EndsWith("=", StringComparison.Ordinal))
+                        token = token.Substring(0, token.Length - 1);
+
+                    m_activeTokens.AddOrUpdate(token, key => expires, (key, existingValue) =>
+                    {
+                        // Simulate the original behavior => if the token, against all odds, is already used
+                        // we throw an ArgumentException
+                        throw new ArgumentException("An element with the same key already exists in the dictionary.");
+                    });
+
+                    response.Cookies.Add(new HttpServer.ResponseCookie(AUTH_COOKIE_NAME, token, expires));
+
+                    using(var bw = new BodyWriter(response, request))
+                        bw.OutputOK();
+
+                    return true;
                 }
             }
 
-            var limitedAccess =
-                request.Uri.AbsolutePath.StartsWith(RESTHandler.API_URI_PATH, StringComparison.OrdinalIgnoreCase)
-            ;
+            var limitedAccess = request.Uri.AbsolutePath.StartsWith(RESTHandler.API_URI_PATH, StringComparison.OrdinalIgnoreCase);
 
             // Override to allow the CAPTCHA call to go through
             if (request.Uri.AbsolutePath.StartsWith(CAPTCHA_IMAGE_URI, StringComparison.OrdinalIgnoreCase) && request.Method == "GET")
@@ -293,7 +318,6 @@ namespace Duplicati.Server.WebServer
 
             foreach(var k in (from n in m_activeTokens where DateTime.UtcNow > n.Value select n.Key))
                 m_activeTokens.TryRemove(k, out _);
-
 
             // If we have a valid token, proceed
             if (!string.IsNullOrWhiteSpace(auth_token))

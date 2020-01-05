@@ -82,14 +82,6 @@ namespace Duplicati.GUI.TrayIcon
             action.Invoke();
         }
 
-        protected override void RegisterStatusUpdateCallback()
-        {
-            Program.Connection.OnStatusUpdated += delegate (IServerStatus status)
-            {
-                this.OnStatusUpdated(status);
-            };
-        }
-
         #region implemented abstract members of Duplicati.GUI.TrayIcon.TrayIconBase
         protected override void Run(string[] args)
         {

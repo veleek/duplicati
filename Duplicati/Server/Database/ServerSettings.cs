@@ -308,33 +308,28 @@ namespace Duplicati.Server.Database
 
         public void SetWebserverPassword(string password)
         {
-            if (string.IsNullOrWhiteSpace(password))
-            {
-                lock(databaseConnection.m_lock)
-                {
-                    settings[CONST.SERVER_PASSPHRASE] = "";
-                    settings[CONST.SERVER_PASSPHRASE_SALT] = "";
-                }
-            }
-            else
+            string passwordHash = "";
+            string passwordSalt = "";
+
+            if (!string.IsNullOrWhiteSpace(password))
             {
                 var prng = RandomNumberGenerator.Create();
                 var buf = new byte[32];
                 prng.GetBytes(buf);
-                var salt = Convert.ToBase64String(buf);
+                passwordSalt = Convert.ToBase64String(buf);
 
-                var sha256 = System.Security.Cryptography.SHA256.Create();
+                HashAlgorithm hash = SHA256.Create();
                 var str = System.Text.Encoding.UTF8.GetBytes(password);
 
-                sha256.TransformBlock(str, 0, str.Length, str, 0);
-                sha256.TransformFinalBlock(buf, 0, buf.Length);
-                var pwd = Convert.ToBase64String(sha256.Hash);
+                hash.TransformBlock(str, 0, str.Length, str, 0);
+                hash.TransformFinalBlock(buf, 0, buf.Length);
+                passwordHash = Convert.ToBase64String(hash.Hash);
+            }
 
-                lock(databaseConnection.m_lock)
-                {
-                    settings[CONST.SERVER_PASSPHRASE] = pwd;
-                    settings[CONST.SERVER_PASSPHRASE_SALT] = salt;
-                }
+            lock (databaseConnection.m_lock)
+            {
+                settings[CONST.SERVER_PASSPHRASE] = passwordHash;
+                settings[CONST.SERVER_PASSPHRASE_SALT] = passwordSalt;
             }
 
             SaveSettings();
@@ -356,26 +351,26 @@ namespace Duplicati.Server.Database
 
         public void GenerateWebserverPasswordTrayIcon()
         {
-            var password = "";
-            var pwd = "";
+            string password = "";
+            string passwordHash = "";
 
             if (!string.IsNullOrEmpty(settings[CONST.SERVER_PASSPHRASE]))
             {
                 password = Guid.NewGuid().ToString();
-                var buf = Convert.FromBase64String(settings[CONST.SERVER_PASSPHRASE_SALT]);
+                var passwordSalt = Convert.FromBase64String(settings[CONST.SERVER_PASSPHRASE_SALT]);
 
-                var sha256 = System.Security.Cryptography.SHA256.Create();
+                HashAlgorithm hash = SHA256.Create();
                 var str = System.Text.Encoding.UTF8.GetBytes(password);
 
-                sha256.TransformBlock(str, 0, str.Length, str, 0);
-                sha256.TransformFinalBlock(buf, 0, buf.Length);
-                pwd = Convert.ToBase64String(sha256.Hash);
+                hash.TransformBlock(str, 0, str.Length, str, 0);
+                hash.TransformFinalBlock(passwordSalt, 0, passwordSalt.Length);
+                passwordHash = Convert.ToBase64String(hash.Hash);
             }
             
             lock (databaseConnection.m_lock)
             {
                 settings[CONST.SERVER_PASSPHRASETRAYICON] = password;
-                settings[CONST.SERVER_PASSPHRASETRAYICONHASH] = pwd;
+                settings[CONST.SERVER_PASSPHRASETRAYICONHASH] = passwordHash;
             }
 
             SaveSettings();

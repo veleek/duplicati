@@ -44,7 +44,12 @@ namespace Duplicati.GUI.TrayIcon
             
             m_runner.Start();
 
-            if (!Duplicati.Server.Program.ServerStartedEvent.WaitOne(TimeSpan.FromSeconds(100), true))
+#if DEBUG
+            TimeSpan serverStartupTimeout = TimeSpan.FromMinutes(10);
+#else
+            TimeSpan serverStartupTimeout = TimeSpan.FromSeconds(100);
+#endif
+            if (!Duplicati.Server.Program.ServerStartedEvent.WaitOne(serverStartupTimeout, true))
             {
                 if (m_runnerException != null)
                     throw m_runnerException;

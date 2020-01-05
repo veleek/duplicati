@@ -16,8 +16,8 @@
 //  License along with this library; if not, write to the Free Software
 //  Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA 02111-1307 USA
 using System;
+using System.IO;
 using System.Linq;
-using HttpServer;
 using HttpServer.HttpModules;
 using HttpServer.Exceptions;
 using Duplicati.Library.Common.IO;
@@ -28,18 +28,17 @@ namespace Duplicati.Server.WebServer
     {
         private readonly string m_webroot;
 
-        private static readonly string[] ForbiddenChars = new string[] {"\\", "..", ":"}.Union(from n in System.IO.Path.GetInvalidPathChars() select n.ToString()).Distinct().ToArray();
-        private static readonly string DirSep = Util.DirectorySeparatorString;
+        private static readonly string[] ForbiddenChars = new string[] {"\\", "..", ":"}.Union(from n in Path.GetInvalidPathChars() select n.ToString()).Distinct().ToArray();
 
         public IndexHtmlHandler(string webroot) { m_webroot = webroot; }
 
         public override bool Process(HttpServer.IHttpRequest request, HttpServer.IHttpResponse response, HttpServer.Sessions.IHttpSession session)
         {
             var path = this.GetPath(request.Uri);
-            var html = System.IO.Path.Combine(path, "index.html");
-            var htm = System.IO.Path.Combine(path, "index.htm");
+            var html = Path.Combine(path, "index.html");
+            var htm = Path.Combine(path, "index.htm");
 
-            if (System.IO.Directory.Exists(path) && (System.IO.File.Exists(html) || System.IO.File.Exists(htm)))
+            if (Directory.Exists(path) && (File.Exists(html) || File.Exists(htm)))
             {
                 if (!request.Uri.AbsolutePath.EndsWith("/", StringComparison.Ordinal))
                 {
@@ -52,7 +51,7 @@ namespace Duplicati.Server.WebServer
                 response.ContentType = "text/html; charset=utf-8";
                 response.AddHeader("Cache-Control", "no-cache, no-store, must-revalidate, max-age=0");
 
-                using (var fs = System.IO.File.OpenRead(System.IO.File.Exists(html) ? html : htm))
+                using (var fs = File.OpenRead(File.Exists(html) ? html : htm))
                 {
                     response.ContentLength = fs.Length;
                     response.Body = fs;
@@ -69,11 +68,12 @@ namespace Duplicati.Server.WebServer
         {
             if (ForbiddenChars.Any(x => uri.AbsolutePath.Contains(x)))
                 throw new BadRequestException("Illegal path");
+
             string uripath = Uri.UnescapeDataString(uri.AbsolutePath);
-            uripath = System.IO.Path.GetDirectoryName(uripath);
-            uripath = uripath.TrimStart('/', Util.DirectorySeparatorChar);
+            uripath = uripath.Replace('/', Path.DirectorySeparatorChar);
+            uripath = uripath.TrimStart(Util.DirectorySeparatorChar);
             
-            return System.IO.Path.Combine(m_webroot, uripath.Replace('/', System.IO.Path.DirectorySeparatorChar));
+            return Path.Combine(m_webroot, uripath);
         }
     }
 }

@@ -22,8 +22,12 @@ namespace Duplicati.Library.Common.IO
     public static class Util
     {
         /// <summary>
-        /// The path directory separator as a char.  This is simply used for consistency with where the directory separator is loaded.
+        /// The path directory separator as a char.
         /// </summary>
+        /// <remarks>
+        /// This only exists so that there is consistency in the codebase with where 
+        /// the directory separator is accessed.
+        /// </remarks>
         public static readonly char DirectorySeparatorChar = Path.DirectorySeparatorChar;
 
         /// <summary>

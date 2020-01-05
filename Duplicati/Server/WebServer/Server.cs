@@ -218,8 +218,8 @@ namespace Duplicati.Server.WebServer
 
             if (!System.IO.Directory.Exists(System.IO.Path.Combine(webroot, "webroot")))
             {
-                //For debug we go "../../../.." to get out of "GUI/Duplicati.GUI.TrayIcon/bin/debug"
-                string tmpwebroot = System.IO.Path.GetFullPath(System.IO.Path.Combine(webroot, "..", "..", "..", ".."));
+                //For debug we go "../../../.." to get out of "GUI/Duplicati.GUI.TrayIcon/bin/debug/netcoreappX.X"
+                string tmpwebroot = System.IO.Path.GetFullPath(System.IO.Path.Combine(webroot, "..", "..", "..", "..", ".."));
                 tmpwebroot = System.IO.Path.Combine(tmpwebroot, "Server");
                 if (System.IO.Directory.Exists(System.IO.Path.Combine(tmpwebroot, "webroot")))
                     webroot = tmpwebroot;
@@ -259,25 +259,27 @@ namespace Duplicati.Server.WebServer
                 }
             }
 
-            if (install_webroot != webroot && System.IO.Directory.Exists(System.IO.Path.Combine(install_webroot, "customized")))
+            if (install_webroot != webroot)
             {
-                var customized_files = new CacheControlFileHandler("/customized/", System.IO.Path.Combine(install_webroot, "customized"));
-                AddMimeTypes(customized_files);
-                server.Add(customized_files);
-            }
+                void AddFolderFileHandler(string folderName, string uriName = null)
+                {
+                    string folderPath = System.IO.Path.Combine(install_webroot, folderName);
+                    if (System.IO.Directory.Exists(folderPath))
+                    {
+                        if(uriName == null)
+                        {
+                            uriName = folderName;
+                        }
 
-            if (install_webroot != webroot && System.IO.Directory.Exists(System.IO.Path.Combine(install_webroot, "oem")))
-            {
-                var oem_files = new CacheControlFileHandler("/oem/", System.IO.Path.Combine(install_webroot, "oem"));
-                AddMimeTypes(oem_files);
-                server.Add(oem_files);
-            }
+                        var folderFileHandler = new CacheControlFileHandler($"/{uriName ?? folderName}/", folderPath);
+                        AddMimeTypes(folderFileHandler);
+                        server.Add(folderFileHandler);
+                    }
+                }
 
-            if (install_webroot != webroot && System.IO.Directory.Exists(System.IO.Path.Combine(install_webroot, "package")))
-            {
-                var proxy_files = new CacheControlFileHandler("/proxy/", System.IO.Path.Combine(install_webroot, "package"));
-                AddMimeTypes(proxy_files);
-                server.Add(proxy_files);
+                AddFolderFileHandler("customized");
+                AddFolderFileHandler("oem");
+                AddFolderFileHandler("package", "proxy");
             }
 
             var fh = new CacheControlFileHandler("/", webroot, true);
