@@ -337,7 +337,6 @@ namespace Duplicati.CommandLine.BackendTester
                     {
                         using (Duplicati.Library.Utility.TempFile cf = new Duplicati.Library.Utility.TempFile())
                         {
-                            Exception e = null;
                             Console.Write("Downloading file {0} ... ", i);
 
                             try
@@ -351,17 +350,12 @@ namespace Duplicati.CommandLine.BackendTester
                                 else
                                     backend.Get(files[i].remotefilename, cf);
 
-                                e = null;
+                                Console.WriteLine("done");
                             }
                             catch (Exception ex)
                             {
-                                e = ex;
+                                Console.WriteLine("failed\n*** Error: {0}", ex);
                             }
-
-                            if (e != null)
-                                Console.WriteLine("failed\n*** Error: {0}", e);
-                            else
-                                Console.WriteLine("done");
 
                             Console.Write("Checking hash ... ");
 

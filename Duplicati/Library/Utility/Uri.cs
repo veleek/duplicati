@@ -173,7 +173,7 @@ namespace Duplicati.Library.Utility
             // file://c:\test support
             if (h.Length == 1 && p.StartsWith(":", StringComparison.Ordinal))
             {
-                h = h + p;
+                h += p;
                 p = "";
             }
 
@@ -344,7 +344,7 @@ namespace Duplicati.Library.Utility
         /// <returns>The encoded URL</returns>
         /// <param name="value">The URL fragment to encode</param>
         /// <param name="encoding">The encoding to use</param>
-        public static string UrlPathEncode(string value, System.Text.Encoding encoding = null)
+        public static string UrlPathEncode(string value, Encoding encoding = null)
         {
             return UrlEncode(value, encoding, "%20");
         }
@@ -355,14 +355,12 @@ namespace Duplicati.Library.Utility
         /// <returns>The encoded URL</returns>
         /// <param name="value">The URL fragment to encode</param>
         /// <param name="encoding">The encoding to use</param>
-        public static string UrlEncode(string value, System.Text.Encoding encoding = null, string spacevalue = "+")
+        public static string UrlEncode(string value, Encoding encoding = null, string spacevalue = "+")
         {
             if (value == null)
                 throw new ArgumentNullException(nameof(value));
 
-            encoding = encoding ?? System.Text.Encoding.UTF8;
-
-            var encoder = encoding.GetEncoder();
+            var encoder = (encoding ?? Encoding.UTF8).GetEncoder();
             var inbuf = new char[1];
             var outbuf = new byte[4];
 
@@ -399,14 +397,12 @@ namespace Duplicati.Library.Utility
         /// <returns>The decoded URL</returns>
         /// <param name="value">The URL fragment to decode</param>
         /// <param name="encoding">The encoding to use</param>
-        public static string UrlDecode(string value, System.Text.Encoding encoding = null)
+        public static string UrlDecode(string value, Encoding encoding = null)
         {
             if (value == null)
                 throw new ArgumentNullException(nameof(value));
-
-            encoding = encoding ?? System.Text.Encoding.UTF8;
-
-            var decoder = encoding.GetDecoder();
+            
+            var decoder = (encoding ?? Encoding.UTF8).GetDecoder();
             var inbuf = new byte[8];
             var outbuf = new char[8];
 

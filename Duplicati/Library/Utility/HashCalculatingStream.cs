@@ -68,6 +68,8 @@ namespace Duplicati.Library.Utility
 
             if (m_hash != null)
             {
+                GetFinalHash();
+
                 m_hash.Clear();
                 m_hash = null;
 
